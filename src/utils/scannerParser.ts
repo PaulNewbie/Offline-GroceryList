@@ -7,11 +7,15 @@ export interface ParsedProduct {
 
 // Restored: Helper function to auto-insert decimals
 const formatPrice = (rawStr: string) => {
-   let nums = rawStr.replace(/[^0-9]/g, '');
-   if (nums.length >= 3 && !rawStr.includes('.')) {
-      nums = nums.slice(0, -2) + '.' + nums.slice(-2);
+   // Keep ONLY numbers and the decimal dot (deletes commas, spaces, letters)
+   let cleaned = rawStr.replace(/[^0-9.]/g, '');
+
+   // If the OCR completely missed the dot, auto-insert it 2 spaces from the end
+   if (cleaned.length >= 3 && !cleaned.includes('.')) {
+      cleaned = cleaned.slice(0, -2) + '.' + cleaned.slice(-2);
    }
-   return `₱${nums}`;
+   
+   return `₱${cleaned}`;
 };
 
 export const processScannedText = async (
