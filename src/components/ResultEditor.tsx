@@ -1,9 +1,14 @@
 import React from 'react';
 import { StyleSheet, View, Text, TextInput, Switch, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ResultEditor({ scanner, onSave, onViewInventory }: any) {
+  // Initialize the hook to get system navigation bar height
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.container}>
+    // Override the paddingBottom dynamically using the inset
+    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 20) }]}>
       {/* Elevated Card Layout */}
       <View style={styles.card}>
         <Text style={styles.label}>Product</Text>
@@ -70,7 +75,7 @@ export default function ResultEditor({ scanner, onSave, onViewInventory }: any) 
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 0.45, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, justifyContent: 'space-between' },
+  container: { paddingHorizontal: 20, paddingTop: 10 },
   card: { backgroundColor: '#1C1C1E', padding: 20, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 8 },
   label: { color: '#A1A1AA', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontWeight: '700' },
   

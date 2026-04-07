@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, SafeAreaView, View, Text, Alert } from 'react-native';
+import { StyleSheet, View, Text, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera } from 'react-native-vision-camera';
 import * as Haptics from 'expo-haptics';
 
@@ -30,7 +31,7 @@ export default function ScannerScreen({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.cameraContainer}>
         <Camera ref={scanner.cameraRef} style={StyleSheet.absoluteFill} device={scanner.device} isActive={true} photo={true} torch={scanner.isTorchOn ? 'on' : 'off'} />
         <ScannerOverlay isModelLoading={scanner.isModelLoading} isTorchOn={scanner.isTorchOn} toggleTorch={() => scanner.setIsTorchOn(!scanner.isTorchOn)} />
@@ -45,7 +46,7 @@ const styles = StyleSheet.create({
   loading: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#FFF' },
   cameraContainer: { 
-    flex: 0.55, 
+    flex: 1, 
     overflow: 'hidden', 
     borderRadius: 24, 
     marginHorizontal: 16, 
