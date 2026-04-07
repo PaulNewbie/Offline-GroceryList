@@ -47,3 +47,29 @@ export const getOfflineItems = async () => {
     return [];
   }
 };
+
+// Update
+export const updateItemInDB = async (id: number, product: string, price: string) => {
+  try {
+    // We set is_synced back to 0 so future cloud syncs know this was modified
+    await db.runAsync(
+      'UPDATE ScannedItems SET product = ?, price = ?, is_synced = 0 WHERE id = ?',
+      [product, price, id]
+    );
+    return true;
+  } catch (error) {
+    console.error('Error updating item:', error);
+    return false;
+  }
+};
+
+// Delete
+export const deleteItemFromDB = async (id: number) => {
+  try {
+    await db.runAsync('DELETE FROM ScannedItems WHERE id = ?', [id]);
+    return true;
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    return false;
+  }
+};

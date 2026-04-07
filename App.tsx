@@ -1,6 +1,6 @@
 // App.tsx
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert, TextInput } from 'react-native';
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 
@@ -22,6 +22,10 @@ export default function App() {
   // App State
   const [isProcessing, setIsProcessing] = useState(false);
   const [structuredData, setStructuredData] = useState<ParsedProduct | null>(null);
+
+  // State for the editable text fields
+  const [editProduct, setEditProduct] = useState("");
+  const [editPrice, setEditPrice] = useState("");
   
   // Database UI State
   const [offlineItems, setOfflineItems] = useState<any[]>([]);
@@ -87,6 +91,9 @@ export default function App() {
           onnxSession
         );
         setStructuredData(parsedResults);
+
+        setEditProduct(parsedResults.product);
+        setEditPrice(parsedResults.price);
       }
     } catch (error) {
       console.error("Scanning Error: ", error);
@@ -97,12 +104,18 @@ export default function App() {
   };
 
   const handleSaveToInventory = async () => {
-    if (!structuredData || structuredData.price === "---") return;
+    // Check the editable state instead of structuredData
+    if (!editProduct || editPrice === "---" || editPrice === "") return;
     
-    const insertId = await saveItemToDB(structuredData.product, structuredData.price);
+    const insertId = await saveItemToDB(editProduct, editPrice);
     if (insertId) {
       Alert.alert("Success", "Item saved offline.");
+      
+      // Clear everything out for the next scan
       setStructuredData(null); 
+      setEditProduct("");
+      setEditPrice("");
+      
       refreshInventory();
     }
   };
@@ -136,9 +149,25 @@ export default function App() {
       <View style={styles.uiContainer}>
         <View style={styles.resultCard}>
           <Text style={styles.label}>Product:</Text>
-          <Text style={styles.productText}>{structuredData ? structuredData.product : "Waiting..."}</Text>
+          {/* NEW: Changed from Text to TextInput */}
+          <TextInput 
+            style={styles.productText} 
+            value={editProduct} 
+            onChangeText={setEditProduct}
+            placeholder="Scanning..."
+            placeholderTextColor="#555"
+          />
+          
           <Text style={styles.label}>Price:</Text>
-          <Text style={styles.priceText}>{structuredData ? structuredData.price : "---"}</Text>
+          {/* NEW: Changed from Text to TextInput */}
+          <TextInput 
+            style={styles.priceTextInput} 
+            value={editPrice} 
+            onChangeText={setEditPrice}
+            keyboardType="numeric" // Helps them type numbers easily
+            placeholder="---"
+            placeholderTextColor="#555"
+          />
         </View>
 
         {/* 3. CONTROLS MODULE */}
@@ -168,6 +197,7 @@ export default function App() {
         visible={isModalVisible} 
         onClose={() => setIsModalVisible(false)} 
         items={offlineItems} 
+        onRefresh={refreshInventory}
       />
 
     </SafeAreaView>
@@ -194,6 +224,7 @@ const styles = StyleSheet.create({
   label: { color: '#888', fontSize: 12, textTransform: 'uppercase', marginBottom: 4 },
   productText: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 15 },
   priceText: { color: '#00FF00', fontSize: 32, fontWeight: 'bold' },
+  priceTextInput: { color: '#00FF00', fontSize: 32, fontWeight: 'bold', marginBottom: 15 },
   
   controlsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
   btn: { padding: 18, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
