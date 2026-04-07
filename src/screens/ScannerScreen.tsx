@@ -44,5 +44,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
   loading: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#FFF' },
-  cameraContainer: { flex: 0.55, overflow: 'hidden', borderRadius: 20, margin: 10, position: 'relative' },
+  cameraContainer: { 
+    flex: 0.55, 
+    overflow: 'hidden', 
+    borderRadius: 24, 
+    marginHorizontal: 16, 
+    marginTop: 16, 
+    marginBottom: 8, 
+    position: 'relative' 
+  },
 });
