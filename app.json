@@ -41,7 +41,8 @@
           "cameraPermissionText": "$(PRODUCT_NAME) needs access to your camera to scan grocery items."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-asset"
     ]
   }
 }

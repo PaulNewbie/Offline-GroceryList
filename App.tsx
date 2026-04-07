@@ -4,6 +4,10 @@ import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicat
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 
+// NEW: Import the ONNX runtime and Expo File System
+import { InferenceSession } from 'onnxruntime-react-native';
+import { Asset } from 'expo-asset';
+
 // Extracted Logic & Components
 import { processScannedText, ParsedProduct } from './src/utils/scannerParser';
 import { initDatabase, saveItemToDB, getOfflineItems } from './src/utils/database';
@@ -23,12 +27,39 @@ export default function App() {
   const [offlineItems, setOfflineItems] = useState<any[]>([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
 
+  // NEW: State to hold the loaded AI Brain and track its loading status
+  const [onnxSession, setOnnxSession] = useState<InferenceSession | null>(null);
+  const [isModelLoading, setIsModelLoading] = useState(true); 
+
   useEffect(() => {
     (async () => {
+      // 1. Request Hardware Permissions
       const status = await Camera.requestCameraPermission();
       setHasPermission(status === 'granted');
+      
+      // 2. Initialize the Offline Database
       await initDatabase();
       refreshInventory();
+
+      // 3. Load the AI Brain into RAM on startup
+      try {
+        console.log("Loading AI model...");
+        const modelAsset = await Asset.loadAsync(require('./assets/models/model_quantized.onnx'));
+        
+        // NEW FIX: Extract the URI and prove to TypeScript it is not null
+        const uri = modelAsset[0].localUri;
+        if (!uri) {
+          throw new Error("Model URI is null. Asset failed to bundle correctly.");
+        }
+
+        const session = await InferenceSession.create(uri);
+        setOnnxSession(session);
+        console.log("✅ ONNX AI Brain successfully loaded!");
+      } catch (e) {
+        console.error("❌ Failed to load AI model:", e);
+      } finally {
+        setIsModelLoading(false); // Enable the scan button once loaded
+      }
     })();
   }, []);
 
@@ -38,7 +69,9 @@ export default function App() {
   };
 
   const captureAndRead = async () => {
-    if (!cameraRef.current) return;
+    // Prevent scanning if camera is off or AI isn't loaded yet
+    if (!cameraRef.current || isModelLoading) return; 
+    
     try {
       setIsProcessing(true);
       setStructuredData(null); 
@@ -46,11 +79,18 @@ export default function App() {
       const result = await TextRecognition.recognize(`file://${photo.path}`);
 
       if (result.blocks) {
-        const parsedResults = processScannedText(result.blocks, photo.width, photo.height);
+        // NEW: Ensure we await processScannedText and pass the AI session
+        const parsedResults = await processScannedText(
+          result.blocks, 
+          photo.width, 
+          photo.height, 
+          onnxSession
+        );
         setStructuredData(parsedResults);
       }
     } catch (error) {
       console.error("Scanning Error: ", error);
+      Alert.alert("Error", "Something went wrong while scanning.");
     } finally {
       setIsProcessing(false);
     }
@@ -67,7 +107,13 @@ export default function App() {
     }
   };
 
-  if (!hasPermission || device == null) return <View style={styles.loading}><Text style={styles.loadingText}>Initializing Camera...</Text></View>;
+  if (!hasPermission || device == null) {
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.loadingText}>Initializing Camera...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -80,7 +126,9 @@ export default function App() {
             <View style={styles.bracketTopLeft} /><View style={styles.bracketTopRight} />
             <View style={styles.bracketBottomLeft} /><View style={styles.bracketBottomRight} />
           </View>
-          <Text style={styles.overlayText}>Align tag inside the box</Text>
+          <Text style={styles.overlayText}>
+             {isModelLoading ? "Loading AI Brain..." : "Align tag inside the box"}
+          </Text>
         </View>
       </View>
 
@@ -95,7 +143,11 @@ export default function App() {
 
         {/* 3. CONTROLS MODULE */}
         <View style={styles.controlsRow}>
-          <TouchableOpacity style={[styles.btn, styles.scanBtn]} onPress={captureAndRead} disabled={isProcessing}>
+          <TouchableOpacity 
+            style={[styles.btn, styles.scanBtn, isModelLoading && { backgroundColor: '#555' }]} 
+            onPress={captureAndRead} 
+            disabled={isProcessing || isModelLoading}
+          >
             {isProcessing ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Scan Tag</Text>}
           </TouchableOpacity>
 

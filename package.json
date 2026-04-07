@@ -11,6 +11,7 @@
   "dependencies": {
     "@react-native-ml-kit/text-recognition": "^2.0.0",
     "expo": "~54.0.33",
+    "expo-asset": "~12.0.12",
     "expo-dev-client": "~6.0.20",
     "expo-file-system": "^55.0.14",
     "expo-sqlite": "~16.0.10",
