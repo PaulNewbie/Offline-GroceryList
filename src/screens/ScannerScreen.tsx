@@ -1,3 +1,4 @@
+// src/screens/ScannerScreen.tsx
 import React from 'react';
 import { StyleSheet, View, Text, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,48 +11,82 @@ import ScannerOverlay from '../components/ScannerOverlay';
 import ResultEditor from '../components/ResultEditor';
 
 export default function ScannerScreen({ navigation }: any) {
-  // We pass a blank function for refreshInventory since the Inventory screen handles its own fetching now
-  const scanner = useScannerAI(() => {}); 
+  const scanner = useScannerAI(() => {});
 
   const handleSaveToInventory = async () => {
-    if (!scanner.editProduct || scanner.editPrice === "---" || scanner.editPrice === "") return;
-    
+    if (!scanner.editProduct || scanner.editPrice === '---' || scanner.editPrice === '') return;
+
     const insertId = await saveItemToDB(scanner.editProduct, scanner.editPrice);
     if (insertId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Success", "Item saved offline.");
-      scanner.setStructuredData(null); 
-      scanner.setEditProduct("");
-      scanner.setEditPrice("");
+      Alert.alert('Saved!', `${scanner.editProduct} added to your list.`);
+      scanner.setStructuredData(null);
+      scanner.setEditProduct('');
+      scanner.setEditPrice('');
     }
   };
 
   if (!scanner.hasPermission || scanner.device == null) {
-    return <View style={styles.loading}><Text style={styles.loadingText}>Initializing Camera...</Text></View>;
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.loadingText}>Initializing Camera…</Text>
+      </View>
+    );
   }
 
   return (
+    // Only apply safe area insets on top/sides; bottom is handled by ResultEditor
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      {/* Camera — takes up roughly top 52% of the screen */}
       <View style={styles.cameraContainer}>
-        <Camera ref={scanner.cameraRef} style={StyleSheet.absoluteFill} device={scanner.device} isActive={true} photo={true} torch={scanner.isTorchOn ? 'on' : 'off'} />
-        <ScannerOverlay isModelLoading={scanner.isModelLoading} isTorchOn={scanner.isTorchOn} toggleTorch={() => scanner.setIsTorchOn(!scanner.isTorchOn)} />
+        <Camera
+          ref={scanner.cameraRef}
+          style={StyleSheet.absoluteFill}
+          device={scanner.device}
+          isActive={true}
+          photo={true}
+          torch={scanner.isTorchOn ? 'on' : 'off'}
+        />
+        <ScannerOverlay
+          isModelLoading={scanner.isModelLoading}
+          isTorchOn={scanner.isTorchOn}
+          toggleTorch={() => scanner.setIsTorchOn(!scanner.isTorchOn)}
+        />
       </View>
-      <ResultEditor scanner={scanner} onSave={handleSaveToInventory} onViewInventory={() => navigation.navigate('Inventory')} />
+
+      {/* Bottom sheet */}
+      <ResultEditor
+        scanner={scanner}
+        onSave={handleSaveToInventory}
+        onViewInventory={() => navigation.navigate('Inventory')}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
-  loading: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#FFF' },
-  cameraContainer: { 
-    flex: 1, 
-    overflow: 'hidden', 
-    borderRadius: 24, 
-    marginHorizontal: 16, 
-    marginTop: 16, 
-    marginBottom: 8, 
-    position: 'relative' 
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F7F4', // Matches the sheet so seam is invisible
+  },
+  loading: {
+    flex: 1,
+    backgroundColor: '#F8F7F4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#6B7280',
+    fontSize: 15,
+  },
+  cameraContainer: {
+    // flex: 1 here lets the camera expand naturally;
+    // ResultEditor's content is fixed-height so this takes all remaining space
+    flex: 1,
+    overflow: 'hidden',
+    borderRadius: 24,
+    marginHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 0,
   },
 });
