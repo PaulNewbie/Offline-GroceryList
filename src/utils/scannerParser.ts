@@ -118,13 +118,31 @@ export const processScannedText = async (
   if (aiFoundProduct) {
     finalProduct = aiFoundProduct;
   } else {
-    // --- STEP 2: EXTRACT THE PRODUCT ---
-    let validProductLines = textLines.filter(line => {
-       if (line === "") return false; 
-       if (/PUREGOLD|SM|ROBINSONS/i.test(line)) return false;    // Store Names
-       if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line)) return false; // Dates
-       if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(line)) return false;  // Times
-       if (/^[\d\s\'\-]{8,}$/.test(line)) return false;          // Barcodes
+      // --- STEP 2: EXTRACT THE PRODUCT ---
+      let validProductLines = textLines.filter(line => {
+       const cleanLine = line.trim().toUpperCase();
+       
+       if (cleanLine === "") return false; 
+       
+       // 1. Ignore Store Names 
+       if (/PUREGOLD|SM|ROBINSONS|WALTERMART|SAVE MORE|ALFAMART/i.test(cleanLine)) return false;    
+       
+       // 2. Ignore Dates and Times
+       if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cleanLine)) return false; 
+       if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(cleanLine)) return false;  
+       
+       // 3. Ignore stray Currency markers that got left behind
+       if (cleanLine === 'P' || cleanLine === 'PHP' || cleanLine === '₱') return false;
+
+       // 4. STRONGER Number/Barcode filter (Rejects any line that is mostly numbers)
+       if (/^[0-9\s\-\.]{4,}$/.test(cleanLine)) return false;          
+
+       // 5. Ignore standalone weights/volumes (e.g., "100G", "500 ML", "1.5 L")
+       if (/^\d+(\.\d+)?\s*(G|KG|ML|L|OZ|LB)$/.test(cleanLine)) return false;
+
+       // 6. Ignore random OCR noise (lines with less than 3 characters)
+       if (cleanLine.length < 3) return false;
+
        return true;
     });
 
