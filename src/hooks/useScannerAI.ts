@@ -5,7 +5,7 @@ import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
 import { InferenceSession } from 'onnxruntime-react-native';
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system'; // NEW: Import FileSystem
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { processScannedText, ParsedProduct } from '../utils/scannerParser';
 import { saveItemToDB } from '../utils/database';
