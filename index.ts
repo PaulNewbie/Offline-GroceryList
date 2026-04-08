@@ -1,5 +1,9 @@
-import { registerRootComponent } from 'expo';
+// index.ts
 
+// NEW: Trick Node.js libraries by creating a fake __dirname BEFORE anything else loads!
+(globalThis as any).__dirname = '/';
+
+import { registerRootComponent } from 'expo';
 import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

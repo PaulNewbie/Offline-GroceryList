@@ -5,7 +5,6 @@ import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
 import { InferenceSession } from 'onnxruntime-react-native';
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import { processScannedText, ParsedProduct } from '../utils/scannerParser';
 import { saveItemToDB } from '../utils/database';
@@ -49,9 +48,11 @@ export function useScannerAI(refreshInventory: () => void) {
 
         // NEW: Load the Dictionary (vocab.txt)
         const vocabAsset = await Asset.loadAsync(require('../../assets/models/vocab.txt'));
-        const vocabUri = vocabAsset[0].localUri;
+        const vocabUri = vocabAsset[0].localUri || vocabAsset[0].uri;
+        
         if (vocabUri) {
-           const text = await FileSystem.readAsStringAsync(vocabUri);
+           const response = await fetch(vocabUri);
+           const text = await response.text();
            setVocabText(text); // Save the text into state
         }
 

@@ -57,7 +57,7 @@ export const processScannedText = async (
 
   if (textLines.length === 0) return { product: finalProduct, price: finalPrice };
 
-  // ---------------------------------------------------------
+// ---------------------------------------------------------
   // 🧠 PHASE 1: THE AI ENGINE (DistilBERT ONNX Token Classification)
   // ---------------------------------------------------------
   let aiFoundProduct = "";
@@ -65,73 +65,78 @@ export const processScannedText = async (
 
   if (onnxSession && vocabText) {
     try {
-      // 1. Initialize the Tokenizer
-      const BertTokenizer = require('bert-tokenizer');
-      const tokenizer = new BertTokenizer();
-      tokenizer.loadVocab(vocabText);
+      const { BertTokenizer } = require('bert-tokenizer');
+      const tokenizer = new BertTokenizer(vocabText, true);
 
       const rawText = textLines.join(" ");
       
-      // 2. Translate English to Math (Tokenization)
+      // 2. Translate English to Math (Fixed!)
       const tokens = tokenizer.tokenize(rawText);
-      const inputIds = tokenizer.convertTokensToIds(tokens);
+      const rawInputIds = tokenizer.convertTokensToIds(tokens); // Converts words to IDs!
       
-      // Add standard BERT special tokens: [CLS] (101) at start, [SEP] (102) at end
-      const finalInputIds = [101, ...inputIds, 102]; 
-      const attentionMask = new Array(finalInputIds.length).fill(1);
+      // Add standard BERT special tokens [CLS] (101) and [SEP] (102)
+      let inputIds: number[] = [];
+      if (rawInputIds.length > 0 && rawInputIds[0] !== 101) {
+          inputIds = [101, ...rawInputIds, 102];
+      } else {
+          inputIds = rawInputIds.length > 0 ? rawInputIds : [101, 102];
+      }
 
-      // 3. Create the Tensors (ONNX React Native uses BigInt for int64)
+      const attentionMask = new Array(inputIds.length).fill(1);
+
+      // 3. Create the Tensors
       const tensorInputs = {
-        input_ids: new Tensor('int64', BigInt64Array.from(finalInputIds.map((n: number) => BigInt(n))), [1, finalInputIds.length]),
+        input_ids: new Tensor('int64', BigInt64Array.from(inputIds.map((n: number) => BigInt(n))), [1, inputIds.length]),
         attention_mask: new Tensor('int64', BigInt64Array.from(attentionMask.map((n: number) => BigInt(n))), [1, attentionMask.length])
       };
 
       // 4. RUN THE BRAIN!
       const results = await onnxSession.run(tensorInputs);
       
-      // 5. Decode the Output (Logits)
-      // Logits are a flat array containing the probabilities of each label for each token.
-      const logits = results.logits.data as Float32Array; 
-      const seqLength = finalInputIds.length;
-      const numClasses = logits.length / seqLength; 
+      // 5. Decode the Output (Bulletproof Method)
+      // Instead of guessing the name, we ask the session what its output layer is called!
+      const outputName = onnxSession.outputNames[0]; 
+      const outputTensor = results[outputName];
+      
+      const logits = outputTensor.data as Float32Array; 
+      
+      if (logits && logits.length > 0) {
+        const seqLength = inputIds.length;
+        const numClasses = logits.length / seqLength; 
 
-      let productTokens: string[] = [];
-      let priceTokens: string[] = [];
+        let productTokens: string[] = [];
+        let priceTokens: string[] = [];
+        
+        const vocabLines = vocabText.split(/\r?\n/);
 
-      // Loop through every word to see what the AI labeled it
-      for (let i = 0; i < seqLength; i++) {
-        // Skip the [CLS] and [SEP] boundary tokens
-        if (i === 0 || i === seqLength - 1) continue;
+        for (let i = 0; i < seqLength; i++) {
+          if (i === 0 || i === seqLength - 1) continue;
 
-        let maxScore = -Infinity;
-        let bestClass = 0;
+          let maxScore = -Infinity;
+          let bestClass = 0;
 
-        // Find the highest probability class for this specific word
-        for (let c = 0; c < numClasses; c++) {
-            const score = logits[i * numClasses + c];
-            if (score > maxScore) {
-                maxScore = score;
-                bestClass = c;
-            }
+          for (let c = 0; c < numClasses; c++) {
+              const score = logits[i * numClasses + c];
+              if (score > maxScore) {
+                  maxScore = score;
+                  bestClass = c;
+              }
+          }
+
+          const tokenId = inputIds[i];
+          const currentWord = vocabLines[tokenId] || "";
+
+          // Assuming 1/2 = Product, 3/4 = Price (Update these if your training labels were different!)
+          if (bestClass === 1 || bestClass === 2) {
+              productTokens.push(currentWord);
+          } else if (bestClass === 3 || bestClass === 4) {
+              priceTokens.push(currentWord);
+          }
         }
 
-        const currentToken = tokens[i - 1]; // Offset by 1 because tokens array doesn't have [CLS]
-
-        // IMPORTANT NOTE FOR ALDRIN: 
-        // This assumes your training labels were:
-        // 1 or 2 = Product (B-PRODUCT / I-PRODUCT)
-        // 3 or 4 = Price (B-PRICE / I-PRICE)
-        // If your AI output uses different numbers, just change them here!
-        if (bestClass === 1 || bestClass === 2) {
-            productTokens.push(currentToken);
-        } else if (bestClass === 3 || bestClass === 4) {
-            priceTokens.push(currentToken);
-        }
+        if (productTokens.length > 0) aiFoundProduct = cleanBertTokens(productTokens).toUpperCase();
+        if (priceTokens.length > 0) aiFoundPrice = cleanBertTokens(priceTokens);
       }
-
-      // 6. Clean up the AI's final answer
-      if (productTokens.length > 0) aiFoundProduct = cleanBertTokens(productTokens).toUpperCase();
-      if (priceTokens.length > 0) aiFoundPrice = cleanBertTokens(priceTokens);
       
     } catch (e) {
       console.error("AI Inference error:", e);
