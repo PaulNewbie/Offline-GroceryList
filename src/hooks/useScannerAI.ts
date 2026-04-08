@@ -5,6 +5,8 @@ import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
 import { InferenceSession } from 'onnxruntime-react-native';
 import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system'; // NEW: Import FileSystem
+
 import { processScannedText, ParsedProduct } from '../utils/scannerParser';
 import { saveItemToDB } from '../utils/database';
 
@@ -16,6 +18,7 @@ export function useScannerAI(refreshInventory: () => void) {
 
   // AI & Processing State
   const [onnxSession, setOnnxSession] = useState<InferenceSession | null>(null);
+  const [vocabText, setVocabText] = useState<string | null>(null); // NEW: State to hold the dictionary text
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -29,21 +32,31 @@ export function useScannerAI(refreshInventory: () => void) {
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [scanFeedback, setScanFeedback] = useState("");
 
-  // 1. Initialize Hardware and AI
+  // 1. Initialize Hardware, AI, and Tokenizer Vocab
   useEffect(() => {
     (async () => {
       const status = await Camera.requestCameraPermission();
       setHasPermission(status === 'granted');
 
       try {
+        // Load the AI Brain (ONNX)
         const modelAsset = await Asset.loadAsync(require('../../assets/models/model_quantized.onnx'));
         const uri = modelAsset[0].localUri;
         if (!uri) throw new Error("Model URI is null.");
         
         const session = await InferenceSession.create(uri);
         setOnnxSession(session);
+
+        // NEW: Load the Dictionary (vocab.txt)
+        const vocabAsset = await Asset.loadAsync(require('../../assets/models/vocab.txt'));
+        const vocabUri = vocabAsset[0].localUri;
+        if (vocabUri) {
+           const text = await FileSystem.readAsStringAsync(vocabUri);
+           setVocabText(text); // Save the text into state
+        }
+
       } catch (e) {
-        console.error("Failed to load AI model:", e);
+        console.error("Failed to load AI model or vocab:", e);
       } finally {
         setIsModelLoading(false);
       }
@@ -63,7 +76,14 @@ export function useScannerAI(refreshInventory: () => void) {
       const result = await TextRecognition.recognize(`file://${photo.path}`);
 
       if (result.blocks) {
-        const parsedResults = await processScannedText(result.blocks, photo.width, photo.height, onnxSession);
+        // NEW: Pass BOTH the onnxSession and the vocabText to your parser
+        const parsedResults = await processScannedText(
+            result.blocks, 
+            photo.width, 
+            photo.height, 
+            onnxSession, 
+            vocabText 
+        );
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
         setStructuredData(parsedResults);

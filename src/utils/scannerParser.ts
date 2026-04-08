@@ -1,31 +1,39 @@
 // src/utils/scannerParser.ts
+import { Tensor } from 'onnxruntime-react-native';
 
 export interface ParsedProduct {
   product: string;
   price: string;
 }
 
-// Restored: Helper function to auto-insert decimals
+// Helper function to auto-insert decimals and format price
 const formatPrice = (rawStr: string) => {
-   // Keep ONLY numbers and the decimal dot (deletes commas, spaces, letters)
    let cleaned = rawStr.replace(/[^0-9.]/g, '');
-
-   // If the OCR completely missed the dot, auto-insert it 2 spaces from the end
    if (cleaned.length >= 3 && !cleaned.includes('.')) {
       cleaned = cleaned.slice(0, -2) + '.' + cleaned.slice(-2);
    }
-   
    return `₱${cleaned}`;
+};
+
+// Helper function to clean BERT subwords (e.g., turning "straw" + "##berry" into "strawberry")
+const cleanBertTokens = (tokens: string[]) => {
+  return tokens.reduce((acc, token) => {
+    if (token.startsWith('##')) {
+      return acc + token.replace('##', '');
+    }
+    return acc + (acc ? ' ' : '') + token;
+  }, "");
 };
 
 export const processScannedText = async (
   blocks: any[],
   photoWidth: number,
   photoHeight: number,
-  onnxSession: any // The loaded AI Brain
+  onnxSession: any,     // The loaded AI Brain
+  vocabText: string | null // The Dictionary
 ): Promise<ParsedProduct> => {
   
-  // 1. Target Square Dimensions (Your original targeting logic)
+  // 1. Target Square Dimensions
   const minX = photoWidth * 0.15;
   const maxX = photoWidth * 0.85;
   const minY = photoHeight * 0.35;
@@ -39,7 +47,6 @@ export const processScannedText = async (
 
   filteredBlocks.sort((a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0));
 
-  // Extract all text lines
   let textLines: string[] = [];
   filteredBlocks.forEach(b => {
     textLines.push(...b.text.split('\n').map((t: string) => t.trim()).filter((t: string) => t.length > 0));
@@ -51,22 +58,80 @@ export const processScannedText = async (
   if (textLines.length === 0) return { product: finalProduct, price: finalPrice };
 
   // ---------------------------------------------------------
-  // 🧠 PHASE 1: THE AI ENGINE (DistilBERT ONNX)
+  // 🧠 PHASE 1: THE AI ENGINE (DistilBERT ONNX Token Classification)
   // ---------------------------------------------------------
   let aiFoundProduct = "";
   let aiFoundPrice = "";
 
-  if (onnxSession) {
+  if (onnxSession && vocabText) {
     try {
-      // NOTE: The bridge is ready! Once you add a JS Tokenizer library 
-      // (to convert the text into tensors), the inference call goes right here:
+      // 1. Initialize the Tokenizer
+      const BertTokenizer = require('bert-tokenizer');
+      const tokenizer = new BertTokenizer();
+      tokenizer.loadVocab(vocabText);
+
+      const rawText = textLines.join(" ");
       
-      // const tensorInputs = {
-      //   input_ids: new onnx.Tensor('int64', inputIdsArray, [1, seqLength]),
-      //   attention_mask: new onnx.Tensor('int64', attentionMaskArray, [1, seqLength])
-      // };
-      // const results = await onnxSession.run(tensorInputs);
-      // (Extract BIO tags from results.logits)
+      // 2. Translate English to Math (Tokenization)
+      const tokens = tokenizer.tokenize(rawText);
+      const inputIds = tokenizer.convertTokensToIds(tokens);
+      
+      // Add standard BERT special tokens: [CLS] (101) at start, [SEP] (102) at end
+      const finalInputIds = [101, ...inputIds, 102]; 
+      const attentionMask = new Array(finalInputIds.length).fill(1);
+
+      // 3. Create the Tensors (ONNX React Native uses BigInt for int64)
+      const tensorInputs = {
+        input_ids: new Tensor('int64', BigInt64Array.from(finalInputIds.map((n: number) => BigInt(n))), [1, finalInputIds.length]),
+        attention_mask: new Tensor('int64', BigInt64Array.from(attentionMask.map((n: number) => BigInt(n))), [1, attentionMask.length])
+      };
+
+      // 4. RUN THE BRAIN!
+      const results = await onnxSession.run(tensorInputs);
+      
+      // 5. Decode the Output (Logits)
+      // Logits are a flat array containing the probabilities of each label for each token.
+      const logits = results.logits.data as Float32Array; 
+      const seqLength = finalInputIds.length;
+      const numClasses = logits.length / seqLength; 
+
+      let productTokens: string[] = [];
+      let priceTokens: string[] = [];
+
+      // Loop through every word to see what the AI labeled it
+      for (let i = 0; i < seqLength; i++) {
+        // Skip the [CLS] and [SEP] boundary tokens
+        if (i === 0 || i === seqLength - 1) continue;
+
+        let maxScore = -Infinity;
+        let bestClass = 0;
+
+        // Find the highest probability class for this specific word
+        for (let c = 0; c < numClasses; c++) {
+            const score = logits[i * numClasses + c];
+            if (score > maxScore) {
+                maxScore = score;
+                bestClass = c;
+            }
+        }
+
+        const currentToken = tokens[i - 1]; // Offset by 1 because tokens array doesn't have [CLS]
+
+        // IMPORTANT NOTE FOR ALDRIN: 
+        // This assumes your training labels were:
+        // 1 or 2 = Product (B-PRODUCT / I-PRODUCT)
+        // 3 or 4 = Price (B-PRICE / I-PRICE)
+        // If your AI output uses different numbers, just change them here!
+        if (bestClass === 1 || bestClass === 2) {
+            productTokens.push(currentToken);
+        } else if (bestClass === 3 || bestClass === 4) {
+            priceTokens.push(currentToken);
+        }
+      }
+
+      // 6. Clean up the AI's final answer
+      if (productTokens.length > 0) aiFoundProduct = cleanBertTokens(productTokens).toUpperCase();
+      if (priceTokens.length > 0) aiFoundPrice = cleanBertTokens(priceTokens);
       
     } catch (e) {
       console.error("AI Inference error:", e);
@@ -120,11 +185,29 @@ export const processScannedText = async (
   } else {
     // --- STEP 2: EXTRACT THE PRODUCT ---
     let validProductLines = textLines.filter(line => {
-       if (line === "") return false; 
-       if (/PUREGOLD|SM|ROBINSONS/i.test(line)) return false;    // Store Names
-       if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line)) return false; // Dates
-       if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(line)) return false;  // Times
-       if (/^[\d\s\'\-]{8,}$/.test(line)) return false;          // Barcodes
+       const cleanLine = line.trim().toUpperCase();
+       
+       if (cleanLine === "") return false; 
+       
+       // 1. Ignore Store Names 
+       if (/PUREGOLD|SM|ROBINSONS|WALTERMART|SAVE MORE|ALFAMART/i.test(cleanLine)) return false;    
+       
+       // 2. Ignore Dates and Times
+       if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cleanLine)) return false; 
+       if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(cleanLine)) return false;  
+       
+       // 3. Ignore stray Currency markers that got left behind
+       if (cleanLine === 'P' || cleanLine === 'PHP' || cleanLine === '₱') return false;
+
+       // 4. STRONGER Number/Barcode filter (Rejects any line that is mostly numbers)
+       if (/^[0-9\s\-\.]{4,}$/.test(cleanLine)) return false;          
+
+       // 5. Ignore standalone weights/volumes (e.g., "100G", "500 ML", "1.5 L")
+       if (/^\d+(\.\d+)?\s*(G|KG|ML|L|OZ|LB)$/.test(cleanLine)) return false;
+
+       // 6. Ignore random OCR noise (lines with less than 3 characters)
+       if (cleanLine.length < 3) return false;
+
        return true;
     });
 

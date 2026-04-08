@@ -4,5 +4,6 @@ const config = getDefaultConfig(__dirname);
 
 // Add the .onnx extension to the list of assets
 config.resolver.assetExts.push('onnx');
+config.resolver.assetExts.push('txt');
 
 module.exports = config;
