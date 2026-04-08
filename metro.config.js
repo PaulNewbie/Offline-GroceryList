@@ -10,7 +10,7 @@ config.resolver.assetExts.push('txt');
 
 // 2. Trick the tokenizer by pointing Node modules to our safe versions
 config.resolver.extraNodeModules = {
-  path: require.resolve('path-browserify'),
+  // path: require.resolve('path-browserify'),
   fs: require.resolve('./mock-fs.js'),
 };
 

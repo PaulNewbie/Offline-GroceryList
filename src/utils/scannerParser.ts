@@ -65,79 +65,77 @@ export const processScannedText = async (
 
   if (onnxSession && vocabText) {
     try {
-      const { BertTokenizer } = require('bert-tokenizer');
-      const tokenizer = new BertTokenizer(vocabText, true);
+      // 1. BUILD OUR OWN DICTIONARY (No external libraries needed!)
+      const vocabLines = vocabText.split(/\r?\n/);
+      const vocabMap = new Map<string, number>();
+      vocabLines.forEach((word, index) => {
+          if (word) vocabMap.set(word.trim(), index);
+      });
 
-      const rawText = textLines.join(" ");
-      
-      // 2. Translate English to Math (Fixed!)
-      const tokens = tokenizer.tokenize(rawText);
-      const rawInputIds = tokenizer.convertTokensToIds(tokens); // Converts words to IDs!
-      
-      // Add standard BERT special tokens [CLS] (101) and [SEP] (102)
-      let inputIds: number[] = [];
-      if (rawInputIds.length > 0 && rawInputIds[0] !== 101) {
-          inputIds = [101, ...rawInputIds, 102];
-      } else {
-          inputIds = rawInputIds.length > 0 ? rawInputIds : [101, 102];
-      }
+      // 2. NATIVE TOKENIZATION
+      // Combine text, make it lowercase (like BERT expects), and split into words/punctuation
+      const rawText = textLines.join(" ").toLowerCase();
+      const tokens = rawText.match(/\w+|[^\w\s]/g) || [];
 
+      // 3. TRANSLATE TO IDs
+      const unkId = vocabMap.get('[UNK]') ?? 100;
+      const rawInputIds = tokens.map((t: string) => vocabMap.get(t) ?? unkId);
+      
+      // 4. ADD SPECIAL BOUNDARY TOKENS [CLS] (101) and [SEP] (102)
+      const inputIds = [101, ...rawInputIds, 102];
       const attentionMask = new Array(inputIds.length).fill(1);
 
-      // 3. Create the Tensors
+      // 5. CREATE TENSORS
       const tensorInputs = {
         input_ids: new Tensor('int64', BigInt64Array.from(inputIds.map((n: number) => BigInt(n))), [1, inputIds.length]),
         attention_mask: new Tensor('int64', BigInt64Array.from(attentionMask.map((n: number) => BigInt(n))), [1, attentionMask.length])
       };
 
-      // 4. RUN THE BRAIN!
+      // 6. RUN THE BRAIN!
       const results = await onnxSession.run(tensorInputs);
       
-      // 5. Decode the Output (Bulletproof Method)
-      // Instead of guessing the name, we ask the session what its output layer is called!
-      const outputName = onnxSession.outputNames[0]; 
-      const outputTensor = results[outputName];
-      
-      const logits = outputTensor.data as Float32Array; 
-      
-      if (logits && logits.length > 0) {
-        const seqLength = inputIds.length;
-        const numClasses = logits.length / seqLength; 
-
-        let productTokens: string[] = [];
-        let priceTokens: string[] = [];
+      // 7. DECODE THE OUTPUT safely
+      const resultKeys = Object.keys(results);
+      if (resultKeys.length > 0) {
+        const outputTensor = results[resultKeys[0]]; 
+        const logits = outputTensor.data as Float32Array; 
         
-        const vocabLines = vocabText.split(/\r?\n/);
+        if (logits && logits.length > 0) {
+          const seqLength = inputIds.length;
+          const numClasses = logits.length / seqLength; 
 
-        for (let i = 0; i < seqLength; i++) {
-          if (i === 0 || i === seqLength - 1) continue;
+          let productTokens: string[] = [];
+          let priceTokens: string[] = [];
 
-          let maxScore = -Infinity;
-          let bestClass = 0;
+          for (let i = 0; i < seqLength; i++) {
+            if (i === 0 || i === seqLength - 1) continue;
 
-          for (let c = 0; c < numClasses; c++) {
-              const score = logits[i * numClasses + c];
-              if (score > maxScore) {
-                  maxScore = score;
-                  bestClass = c;
-              }
+            let maxScore = -Infinity;
+            let bestClass = 0;
+
+            for (let c = 0; c < numClasses; c++) {
+                const score = logits[i * numClasses + c];
+                if (score > maxScore) {
+                    maxScore = score;
+                    bestClass = c;
+                }
+            }
+
+            const tokenId = inputIds[i];
+            const currentWord = vocabLines[tokenId] || "";
+
+            // Assuming 1/2 = Product, 3/4 = Price 
+            if (bestClass === 1 || bestClass === 2) {
+                productTokens.push(currentWord);
+            } else if (bestClass === 3 || bestClass === 4) {
+                priceTokens.push(currentWord);
+            }
           }
 
-          const tokenId = inputIds[i];
-          const currentWord = vocabLines[tokenId] || "";
-
-          // Assuming 1/2 = Product, 3/4 = Price (Update these if your training labels were different!)
-          if (bestClass === 1 || bestClass === 2) {
-              productTokens.push(currentWord);
-          } else if (bestClass === 3 || bestClass === 4) {
-              priceTokens.push(currentWord);
-          }
+          if (productTokens.length > 0) aiFoundProduct = cleanBertTokens(productTokens).toUpperCase();
+          if (priceTokens.length > 0) aiFoundPrice = cleanBertTokens(priceTokens);
         }
-
-        if (productTokens.length > 0) aiFoundProduct = cleanBertTokens(productTokens).toUpperCase();
-        if (priceTokens.length > 0) aiFoundPrice = cleanBertTokens(priceTokens);
       }
-      
     } catch (e) {
       console.error("AI Inference error:", e);
     }
