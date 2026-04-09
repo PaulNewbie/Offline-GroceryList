@@ -168,7 +168,7 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
     unitPrice > 0;
 
   return (
-    <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 8, 20) }]}>
+    <View style={[styles.sheet, { paddingBottom: 10 }]}>
 
       {/* ── Top bar ── */}
       <View style={styles.topBar}>

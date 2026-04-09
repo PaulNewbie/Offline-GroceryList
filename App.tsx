@@ -78,7 +78,12 @@ function TabIcon({ focused, label, Icon }: {
   return (
     <View style={styles.tabIconWrap}>
       <Icon focused={focused} />
-      <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>{label}</Text>
+      <Text 
+        numberOfLines={1} 
+        style={[styles.tabLabel, focused && styles.tabLabelFocused]}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -126,12 +131,10 @@ function AppTabs() {
           borderTopColor: '#F3F4F6',
           elevation: 0,
           shadowOpacity: 0,
-          // ↓ This is the key: add the real bottom inset on top of your padding.
-          //   On a 3-button Android phone insets.bottom is usually 24–48px.
-          //   On gesture Android it's 16px. On iPhone with home bar it's 34px.
-          height: 56 + insets.bottom,
-          paddingBottom: insets.bottom,
-          paddingTop: 8,
+          // Increase base height slightly and ensure minimum bottom padding
+          height: 65 + Math.max(insets.bottom, 0),
+          paddingBottom: Math.max(insets.bottom, 10), 
+          paddingTop: 10,
         },
       }}
     >
@@ -177,6 +180,7 @@ const styles = StyleSheet.create({
   tabIconWrap: {
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 65, 
     gap: 3,
   },
   tabLabel: {
