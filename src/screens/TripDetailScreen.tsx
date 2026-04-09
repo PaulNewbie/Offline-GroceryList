@@ -470,12 +470,25 @@ export default function TripDetailScreen({ route, navigation }: any) {
 
   const isFocused = useIsFocused();
 
+// ─── load ─────────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    if (!tripId) return;
-    const t = await getTripById(tripId);
-    const rows = await getTripItems(tripId);
-    setTrip(t);
-    setItems(rows);
+    if (!tripId) {
+      console.warn('[TripDetail] No tripId provided');
+      return;
+    }
+    try {
+      const t = await getTripById(tripId);
+      if (!t) {
+        console.warn('[TripDetail] Trip not found for id:', tripId);
+        return;
+      }
+      const rows = await getTripItems(tripId);
+      setTrip(t);
+      setItems(rows);
+      console.log('[TripDetail] Loaded trip:', t.name, '| items:', rows.length);
+    } catch (e) {
+      console.error('[TripDetail] load error:', e);
+    }
   }, [tripId]);
 
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
@@ -491,10 +504,20 @@ export default function TripDetailScreen({ route, navigation }: any) {
 
   // ── Item handlers ───────────────────────────────────────
   const handleAdd = async (product: string, unitPrice: number, qty: number) => {
-    if (!tripId) return;
-    await addItem(tripId, product, unitPrice, qty);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    load();
+    if (!tripId) {
+      console.warn('[TripDetail] handleAdd called without tripId');
+      return;
+    }
+    const trimmed = product.trim();
+    if (!trimmed) return;
+    
+    const insertId = await addItem(tripId, trimmed, unitPrice, qty);
+    console.log('[TripDetail] addItem result:', insertId, 'for tripId:', tripId);
+    
+    if (insertId) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      load();
+    }
   };
 
   const handleSaveEdit = async (id: number, product: string, unitPrice: number, qty: number) => {

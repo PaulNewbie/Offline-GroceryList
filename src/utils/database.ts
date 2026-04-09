@@ -140,11 +140,13 @@ export const initDatabase = async () => {
     const cnt = await db.getFirstAsync<{ cnt: number }>(
       `SELECT COUNT(*) as cnt FROM Trips WHERE status = 'active'`,
     );
+    console.log('[DB] Active trips count:', cnt?.cnt);
     if ((cnt?.cnt ?? 0) === 0) {
-      await db.runAsync(
+      const newId = await db.runAsync(
         `INSERT INTO Trips (name, status) VALUES (?, 'active')`,
         [`My List — ${new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`],
       );
+      console.log('[DB] Created default active trip id:', newId.lastInsertRowId);
     }
 
     console.log('[DB] Ready ✓');
@@ -233,10 +235,15 @@ export const duplicateTripAsTemplate = async (tripId: number, newName: string): 
 
 export const getTripItems = async (tripId: number): Promise<TripItem[]> => {
   try {
-    return await db.getAllAsync<TripItem>(
-      `SELECT * FROM TripItems WHERE trip_id = ? ORDER BY added_at ASC`, [tripId],
+    const rows = await db.getAllAsync<TripItem>(
+      `SELECT * FROM TripItems WHERE trip_id = ? ORDER BY id ASC`, [tripId],
     );
-  } catch (e) { return []; }
+    console.log('[DB] getTripItems tripId:', tripId, '| count:', rows.length);
+    return rows;
+  } catch (e) {
+    console.error('[DB] getTripItems error:', e);
+    return [];
+  }
 };
 
 // Add any item — price is optional (defaults to 0 / '---' = not set yet)
@@ -247,15 +254,23 @@ export const addItem = async (
   quantity: number = 1,
 ): Promise<number | null> => {
   try {
+    if (!tripId) {
+      console.error('[DB] addItem: invalid tripId', tripId);
+      return null;
+    }
     const price = unitPrice > 0 ? formatPrice(unitPrice) : '---';
     const r = await db.runAsync(
       `INSERT INTO TripItems (trip_id, product, price, unit_price, quantity)
        VALUES (?, ?, ?, ?, ?)`,
       [tripId, product.trim(), price, unitPrice, quantity],
     );
+    console.log('[DB] addItem inserted rowId:', r.lastInsertRowId, 'tripId:', tripId, 'product:', product);
     if (unitPrice > 0) upsertCatalogue(product, unitPrice).catch(() => {});
     return r.lastInsertRowId;
-  } catch (e) { console.error('[DB] addItem:', e); return null; }
+  } catch (e) {
+    console.error('[DB] addItem error:', e);
+    return null;
+  }
 };
 
 // Update an existing item (name + price + qty)
