@@ -1,3 +1,4 @@
+// src/hooks/useScannerAI.ts
 import { useState, useEffect, useRef } from 'react';
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -11,14 +12,15 @@ export function useScannerAI(refreshInventory: () => void) {
   const device = useCameraDevice('back');
   const cameraRef = useRef<Camera>(null);
 
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing]     = useState(false);
   const [structuredData, setStructuredData] = useState<ParsedProduct | null>(null);
-  const [editProduct, setEditProduct] = useState("");
-  const [editPrice, setEditPrice] = useState("");
+  const [editProduct, setEditProduct]       = useState('');
+  const [editPrice, setEditPrice]           = useState('');
+  const [quantity, setQuantity]             = useState(1);   // ← new
 
-  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [isTorchOn, setIsTorchOn]               = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
-  const [scanFeedback, setScanFeedback] = useState("");
+  const [scanFeedback, setScanFeedback]         = useState('');
 
   useEffect(() => {
     (async () => {
@@ -33,35 +35,47 @@ export function useScannerAI(refreshInventory: () => void) {
     try {
       setIsProcessing(true);
       setStructuredData(null);
-      setScanFeedback("");
+      setScanFeedback('');
+      setQuantity(1);  // reset qty on each new scan
 
       const photo = await cameraRef.current.takePhoto({ flash: 'off' });
       const result = await TextRecognition.recognize(`file://${photo.path}`);
 
       if (result.blocks) {
-        // Just raw text blocks and dimensions, no AI!
         const parsedResults = await processScannedText(
-            result.blocks, 
-            photo.width, 
-            photo.height
+          result.blocks,
+          photo.width,
+          photo.height,
         );
-        
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Haptic quality signal
+        if (parsedResults.confidence === 'high') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else if (parsedResults.confidence === 'medium') {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+
         setStructuredData(parsedResults);
         setEditProduct(parsedResults.product);
         setEditPrice(parsedResults.price);
 
-        if (isContinuousMode && parsedResults.price !== "---") {
-          setScanFeedback(`✅ Auto-Saved: ${parsedResults.product}`);
-          await saveItemToDB(parsedResults.product, parsedResults.price);
-          refreshInventory();
-
-          setTimeout(() => {
-            setStructuredData(null);
-            setEditProduct("");
-            setEditPrice("");
-            setScanFeedback("");
-          }, 1500);
+        if (isContinuousMode && parsedResults.price !== '---') {
+          if (parsedResults.confidence === 'high') {
+            setScanFeedback(`✅ Auto-Saved: ${parsedResults.product}`);
+            await saveItemToDB(parsedResults.product, parsedResults.price);
+            refreshInventory();
+            setTimeout(() => {
+              setStructuredData(null);
+              setEditProduct('');
+              setEditPrice('');
+              setQuantity(1);
+              setScanFeedback('');
+            }, 1500);
+          } else {
+            setScanFeedback('⚠  Please verify before saving');
+          }
         }
       }
     } catch (error) {
@@ -75,19 +89,15 @@ export function useScannerAI(refreshInventory: () => void) {
     device,
     cameraRef,
     hasPermission,
-    isModelLoading: false, // Hardcoded to false so your UI spinner never shows!
+    isModelLoading: false,
     isProcessing,
-    isTorchOn,
-    setIsTorchOn,
-    isContinuousMode,
-    setIsContinuousMode,
-    editProduct,
-    setEditProduct,
-    editPrice,
-    setEditPrice,
+    isTorchOn,       setIsTorchOn,
+    isContinuousMode, setIsContinuousMode,
+    editProduct,     setEditProduct,
+    editPrice,       setEditPrice,
+    quantity,        setQuantity,       // ← exposed
     scanFeedback,
     captureAndRead,
-    structuredData,
-    setStructuredData
+    structuredData,  setStructuredData,
   };
 }

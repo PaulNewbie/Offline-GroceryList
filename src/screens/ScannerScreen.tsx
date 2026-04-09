@@ -13,16 +13,34 @@ import ResultEditor from '../components/ResultEditor';
 export default function ScannerScreen({ navigation }: any) {
   const scanner = useScannerAI(() => {});
 
+  // ── Save scanned result ──────────────────────────────────
   const handleSaveToInventory = async () => {
     if (!scanner.editProduct || scanner.editPrice === '---' || scanner.editPrice === '') return;
 
-    const insertId = await saveItemToDB(scanner.editProduct, scanner.editPrice);
+    // Append " x{qty}" to product name when qty > 1 so the list is readable
+    const productLabel =
+      (scanner.quantity ?? 1) > 1
+        ? `${scanner.editProduct} ×${scanner.quantity}`
+        : scanner.editProduct;
+
+    const insertId = await saveItemToDB(productLabel, scanner.editPrice);
     if (insertId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Saved!', `${scanner.editProduct} added to your list.`);
+      Alert.alert('Saved!', `${productLabel} added to your list.`);
       scanner.setStructuredData(null);
       scanner.setEditProduct('');
       scanner.setEditPrice('');
+      scanner.setQuantity(1);
+    }
+  };
+
+  // ── Save manual entry ────────────────────────────────────
+  const handleManualSave = async (product: string, price: string, qty: number) => {
+    const productLabel = qty > 1 ? `${product} ×${qty}` : product;
+    const insertId = await saveItemToDB(productLabel, price);
+    if (insertId) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Added!', `${productLabel} added to your list.`);
     }
   };
 
@@ -35,9 +53,7 @@ export default function ScannerScreen({ navigation }: any) {
   }
 
   return (
-    // Only apply safe area insets on top/sides; bottom is handled by ResultEditor
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Camera — takes up roughly top 52% of the screen */}
       <View style={styles.cameraContainer}>
         <Camera
           ref={scanner.cameraRef}
@@ -54,10 +70,10 @@ export default function ScannerScreen({ navigation }: any) {
         />
       </View>
 
-      {/* Bottom sheet */}
       <ResultEditor
         scanner={scanner}
         onSave={handleSaveToInventory}
+        onManualSave={handleManualSave}
         onViewInventory={() => navigation.navigate('Inventory')}
       />
     </SafeAreaView>
@@ -67,7 +83,7 @@ export default function ScannerScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F7F4', // Matches the sheet so seam is invisible
+    backgroundColor: '#F8F7F4',
   },
   loading: {
     flex: 1,
@@ -80,8 +96,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   cameraContainer: {
-    // flex: 1 here lets the camera expand naturally;
-    // ResultEditor's content is fixed-height so this takes all remaining space
     flex: 1,
     overflow: 'hidden',
     borderRadius: 24,
