@@ -6,26 +6,35 @@ import { Camera } from 'react-native-vision-camera';
 import * as Haptics from 'expo-haptics';
 
 import { useScannerAI } from '../hooks/useScannerAI';
-import { saveItemToDB } from '../utils/database';
+import { saveItemToDB, getActiveTrip } from '../utils/database';
 import ScannerOverlay from '../components/ScannerOverlay';
 import ResultEditor from '../components/ResultEditor';
 
 export default function ScannerScreen({ navigation }: any) {
   const scanner = useScannerAI(() => {});
 
+  // Navigate to the active trip's detail screen
+  const goToList = async () => {
+    const trip = await getActiveTrip();
+    if (trip) {
+      // Navigate through the HomeTab stack to TripDetail
+      navigation.navigate('HomeTab', {
+        screen: 'TripDetail',
+        params: { tripId: trip.id },
+      });
+    }
+  };
+
   // ── Save scanned result ──────────────────────────────────
   const handleSaveToInventory = async () => {
     const unitPrice = parseFloat(scanner.editPrice) || 0;
     const qty       = scanner.quantity ?? 1;
-
     if (!scanner.editProduct || unitPrice === 0) return;
 
     const insertId = await saveItemToDB(scanner.editProduct, unitPrice, qty);
     if (insertId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const label = qty > 1
-        ? `${scanner.editProduct} (×${qty})`
-        : scanner.editProduct;
+      const label = qty > 1 ? `${scanner.editProduct} (×${qty})` : scanner.editProduct;
       Alert.alert('Saved!', `${label} added to your list.`);
       scanner.resetResult();
     }
@@ -41,7 +50,7 @@ export default function ScannerScreen({ navigation }: any) {
     }
   };
 
-  // ── Permission / device not ready ────────────────────────
+  // ── Permission not granted ───────────────────────────────
   if (!scanner.hasPermission || scanner.device == null) {
     return (
       <View style={styles.loading}>
@@ -76,7 +85,7 @@ export default function ScannerScreen({ navigation }: any) {
         scanner={scanner}
         onSave={handleSaveToInventory}
         onManualSave={handleManualSave}
-        onViewInventory={() => navigation.navigate('Inventory')}
+        onViewInventory={goToList}
       />
     </SafeAreaView>
   );
