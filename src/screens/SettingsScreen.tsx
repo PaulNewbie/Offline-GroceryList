@@ -107,7 +107,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
           <View style={[styles.cardRow, styles.cardRowNoBorder]}>
-            <Text style={styles.cardRowTitle}>Buyoyo</Text>
+            <Text style={styles.cardRowTitle}>Grocery Offline</Text>
             <Text style={styles.cardRowSub}>v1.0.0</Text>
           </View>
           <View style={[styles.cardRow, styles.cardRowNoBorder]}>

@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
+import Svg, { Path, Circle, Rect, Line, Polyline } from 'react-native-svg';
 
 import {
   getActiveTrip, getTripItems, getAllTrips,
@@ -55,9 +56,9 @@ export default function HomeScreen({ navigation }: any) {
 
   const greeting = () => {
     const h = new Date().getHours();
-    if (h < 12) return 'Good morning 👋';
-    if (h < 18) return 'Good afternoon 👋';
-    return 'Good evening 👋';
+    if (h < 12) return 'Good morning!';
+    if (h < 18) return 'Good afternoon!';
+    return 'Good evening!';
   };
 
   return (
@@ -78,7 +79,13 @@ export default function HomeScreen({ navigation }: any) {
             onPress={() => navigation.navigate('ScannerTab')}
             activeOpacity={0.85}
           >
-            <Text style={styles.scanFabText}>📷 Scan</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+                <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <Circle cx="12" cy="13" r="4" />
+              </Svg>
+              <Text style={styles.scanFabText}>Scan</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -170,27 +177,43 @@ export default function HomeScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
+            
+            {/* My Lists Action */}
             <TouchableOpacity
               style={styles.actionCard}
               onPress={() => navigation.navigate('ListsTab')}
             >
-              <Text style={styles.actionIcon}>📋</Text>
-              <Text style={styles.actionLabel}>My Lists</Text>
+              <Svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8 }}>
+                <Path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                <Line x1="9" y1="12" x2="15" y2="12" />
+                <Line x1="9" y1="16" x2="15" y2="16" />
+              </Svg>
+              <Text style={styles.actionLabel}>My-Lists</Text>
             </TouchableOpacity>
+
+            {/* Scan Tag Action */}
             <TouchableOpacity
               style={styles.actionCard}
               onPress={() => navigation.navigate('ScannerTab')}
             >
-              <Text style={styles.actionIcon}>📷</Text>
-              <Text style={styles.actionLabel}>Scan Tag</Text>
+              <Svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8 }}>
+                <Path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3M7 12h10M7 9h10M7 15h10" />
+              </Svg>
+              <Text style={styles.actionLabel}>Scan-Tag</Text>
             </TouchableOpacity>
+
+            {/* Settings Action */}
             <TouchableOpacity
               style={styles.actionCard}
               onPress={() => navigation.navigate('SettingsTab')}
             >
-              <Text style={styles.actionIcon}>⚙️</Text>
+              <Svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8 }}>
+                <Circle cx="12" cy="12" r="3" />
+                <Path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+              </Svg>
               <Text style={styles.actionLabel}>Settings</Text>
             </TouchableOpacity>
+
           </View>
         </View>
       </ScrollView>
