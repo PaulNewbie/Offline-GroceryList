@@ -4,25 +4,81 @@ import { StyleSheet, View, Text, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Svg, { Path, Rect, Circle, Line } from 'react-native-svg';
 
 import { initDatabase } from './src/utils/database';
-
 import HomeScreen       from './src/screens/HomeScreen';
 import ListsScreen      from './src/screens/ListsScreen';
 import TripDetailScreen from './src/screens/TripDetailScreen';
 import ScannerScreen    from './src/screens/ScannerScreen';
 import SettingsScreen   from './src/screens/SettingsScreen';
 
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Home: '🏠', Lists: '📋', Scanner: '📷', Settings: '⚙️',
-  };
+// ─── SVG Line Icons ───────────────────────────────────────────────────────────
+const ACTIVE   = '#4F46E5';
+const INACTIVE = '#9CA3AF';
+
+function IconHome({ focused }: { focused: boolean }) {
+  const c = focused ? ACTIVE : INACTIVE;
+  const w = focused ? '2' : '1.6';
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
+      <Path d="M1 9.5L11 2L21 9.5V20C21 20.6 20.6 21 20 21H15V15H7V21H2C1.4 21 1 20.6 1 20V9.5Z"
+        stroke={c} strokeWidth={w} strokeLinejoin="round" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function IconLists({ focused }: { focused: boolean }) {
+  const c = focused ? ACTIVE : INACTIVE;
+  const w = focused ? '2' : '1.6';
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
+      <Rect x="3" y="2" width="16" height="19" rx="2"
+        stroke={c} strokeWidth={w} strokeLinejoin="round" />
+      <Line x1="7" y1="8"  x2="15" y2="8"  stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+      <Line x1="7" y1="12" x2="15" y2="12" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+      <Line x1="7" y1="16" x2="11" y2="16" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function IconScanner({ focused }: { focused: boolean }) {
+  const c = focused ? ACTIVE : INACTIVE;
+  const w = focused ? '2' : '1.6';
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
+      <Rect x="2" y="5" width="18" height="14" rx="2"
+        stroke={c} strokeWidth={w} strokeLinejoin="round" />
+      <Circle cx="11" cy="12" r="3.5" stroke={c} strokeWidth={w} />
+      <Path d="M8 5V4C8 3.4 8.4 3 9 3H13C13.6 3 14 3.4 14 4V5"
+        stroke={c} strokeWidth={w} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function IconSettings({ focused }: { focused: boolean }) {
+  const c = focused ? ACTIVE : INACTIVE;
+  const w = focused ? '2' : '1.6';
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
+      <Circle cx="11" cy="11" r="3" stroke={c} strokeWidth={w} />
+      <Path d="M11 2V4M11 18V20M2 11H4M18 11H20M4.2 4.2L5.6 5.6M16.4 16.4L17.8 17.8M4.2 17.8L5.6 16.4M16.4 5.6L17.8 4.2"
+        stroke={c} strokeWidth={w} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function TabIcon({ focused, label, Icon }: {
+  focused: boolean;
+  label: string;
+  Icon: React.ComponentType<{ focused: boolean }>;
+}) {
   return (
     <View style={styles.tabIconWrap}>
-      <Text style={[styles.tabEmoji, focused && styles.tabEmojiFocused]}>{icons[label]}</Text>
-      <Text style={[styles.tabLabel,  focused && styles.tabLabelFocused]}>{label}</Text>
+      <Icon focused={focused} />
+      <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>{label}</Text>
     </View>
   );
 }
@@ -55,6 +111,54 @@ function HomeStack() {
   );
 }
 
+// ─── The navigator that reads safe area insets at render time ─────────────────
+function AppTabs() {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarShowLabel: false,
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F3F4F6',
+          elevation: 0,
+          shadowOpacity: 0,
+          // ↓ This is the key: add the real bottom inset on top of your padding.
+          //   On a 3-button Android phone insets.bottom is usually 24–48px.
+          //   On gesture Android it's 16px. On iPhone with home bar it's 34px.
+          height: 56 + insets.bottom,
+          paddingBottom: insets.bottom,
+          paddingTop: 8,
+        },
+      }}
+    >
+      <Tab.Screen
+        name="HomeTab"
+        component={HomeStack}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Home"     Icon={IconHome}     /> }}
+      />
+      <Tab.Screen
+        name="ListsTab"
+        component={ListsStack}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Lists"    Icon={IconLists}    /> }}
+      />
+      <Tab.Screen
+        name="ScannerTab"
+        component={ScannerScreen}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Scanner"  Icon={IconScanner}  /> }}
+      />
+      <Tab.Screen
+        name="SettingsTab"
+        component={SettingsScreen}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Settings" Icon={IconSettings} /> }}
+      />
+    </Tab.Navigator>
+  );
+}
+
 export default function App() {
   useEffect(() => { initDatabase(); }, []);
 
@@ -62,12 +166,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <NavigationContainer>
-          <Tab.Navigator screenOptions={{ headerShown: false, tabBarStyle: styles.tabBar, tabBarShowLabel: false }}>
-            <Tab.Screen name="HomeTab"    component={HomeStack}    options={{ tabBarIcon: ({ focused }) => <TabIcon label="Home"     focused={focused} /> }} />
-            <Tab.Screen name="ListsTab"   component={ListsStack}   options={{ tabBarIcon: ({ focused }) => <TabIcon label="Lists"    focused={focused} /> }} />
-            <Tab.Screen name="ScannerTab" component={ScannerScreen} options={{ tabBarIcon: ({ focused }) => <TabIcon label="Scanner"  focused={focused} /> }} />
-            <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ tabBarIcon: ({ focused }) => <TabIcon label="Settings" focused={focused} /> }} />
-          </Tab.Navigator>
+          <AppTabs />
         </NavigationContainer>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -75,10 +174,18 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  tabBar:          { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#F3F4F6', height: Platform.OS === 'ios' ? 84 : 64, paddingBottom: Platform.OS === 'ios' ? 24 : 8, paddingTop: 8, elevation: 0, shadowOpacity: 0 },
-  tabIconWrap:     { alignItems: 'center', justifyContent: 'center', gap: 2 },
-  tabEmoji:        { fontSize: 20 },
-  tabEmojiFocused: { transform: [{ scale: 1.1 }] },
-  tabLabel:        { fontSize: 10, fontWeight: '600', color: '#9CA3AF' },
-  tabLabelFocused: { color: '#4F46E5', fontWeight: '700' },
+  tabIconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#9CA3AF',
+  },
+  tabLabelFocused: {
+    color: '#4F46E5',
+    fontWeight: '700',
+  },
 });
