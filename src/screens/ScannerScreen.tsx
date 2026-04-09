@@ -15,39 +15,41 @@ export default function ScannerScreen({ navigation }: any) {
 
   // ── Save scanned result ──────────────────────────────────
   const handleSaveToInventory = async () => {
-    if (!scanner.editProduct || scanner.editPrice === '---' || scanner.editPrice === '') return;
+    const unitPrice = parseFloat(scanner.editPrice) || 0;
+    const qty       = scanner.quantity ?? 1;
 
-    // Append " x{qty}" to product name when qty > 1 so the list is readable
-    const productLabel =
-      (scanner.quantity ?? 1) > 1
-        ? `${scanner.editProduct} ×${scanner.quantity}`
-        : scanner.editProduct;
+    if (!scanner.editProduct || unitPrice === 0) return;
 
-    const insertId = await saveItemToDB(productLabel, scanner.editPrice);
+    const insertId = await saveItemToDB(scanner.editProduct, unitPrice, qty);
     if (insertId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Saved!', `${productLabel} added to your list.`);
-      scanner.setStructuredData(null);
-      scanner.setEditProduct('');
-      scanner.setEditPrice('');
-      scanner.setQuantity(1);
+      const label = qty > 1
+        ? `${scanner.editProduct} (×${qty})`
+        : scanner.editProduct;
+      Alert.alert('Saved!', `${label} added to your list.`);
+      scanner.resetResult();
     }
   };
 
   // ── Save manual entry ────────────────────────────────────
-  const handleManualSave = async (product: string, price: string, qty: number) => {
-    const productLabel = qty > 1 ? `${product} ×${qty}` : product;
-    const insertId = await saveItemToDB(productLabel, price);
+  const handleManualSave = async (product: string, unitPrice: number, qty: number) => {
+    const insertId = await saveItemToDB(product, unitPrice, qty);
     if (insertId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Added!', `${productLabel} added to your list.`);
+      const label = qty > 1 ? `${product} (×${qty})` : product;
+      Alert.alert('Added!', `${label} added to your list.`);
     }
   };
 
+  // ── Permission / device not ready ────────────────────────
   if (!scanner.hasPermission || scanner.device == null) {
     return (
       <View style={styles.loading}>
-        <Text style={styles.loadingText}>Initializing Camera…</Text>
+        <Text style={styles.loadingText}>
+          {!scanner.hasPermission
+            ? '📷 Camera permission required.\nPlease allow access in Settings.'
+            : 'Initializing Camera…'}
+        </Text>
       </View>
     );
   }
@@ -90,10 +92,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F7F4',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 32,
   },
   loadingText: {
     color: '#6B7280',
     fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   cameraContainer: {
     flex: 1,

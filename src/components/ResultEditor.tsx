@@ -25,7 +25,11 @@ const CONFIDENCE_CONFIG: Record<
   low:    { border: '#DC2626', bg: '#FEF2F2', pill: '#DC2626', pillText: '#FFF', label: 'Tap to edit',   icon: '✎' },
 };
 
+const formatPeso = (n: number) =>
+  `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 // ─── Manual Entry Modal ───────────────────────────────────────────────────────
+// onConfirm now receives (product, unitPrice: number, qty: number)
 function ManualEntryModal({
   visible,
   onClose,
@@ -33,18 +37,20 @@ function ManualEntryModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (product: string, price: string, qty: number) => void;
+  onConfirm: (product: string, unitPrice: number, qty: number) => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const insets   = useSafeAreaInsets();
   const [product, setProduct] = useState('');
-  const [price,   setPrice]   = useState('');
+  const [price,   setPrice]   = useState('');   // plain numeric string
   const [qty,     setQty]     = useState(1);
 
-  const canConfirm = product.trim().length > 0 && price.trim().length > 0;
+  const unitPrice  = parseFloat(price) || 0;
+  const lineTotal  = unitPrice * qty;
+  const canConfirm = product.trim().length > 0 && unitPrice > 0;
 
   const handleConfirm = () => {
     if (!canConfirm) return;
-    onConfirm(product.trim(), `₱${price.trim()}`, qty);
+    onConfirm(product.trim(), unitPrice, qty);
     setProduct(''); setPrice(''); setQty(1);
     onClose();
   };
@@ -81,7 +87,7 @@ function ManualEntryModal({
 
           <View style={styles.modalRow}>
             <View style={styles.modalHalf}>
-              <Text style={styles.modalLabel}>PRICE (₱)</Text>
+              <Text style={styles.modalLabel}>UNIT PRICE (₱)</Text>
               <TextInput
                 style={[styles.modalInput, styles.modalInputPrice]}
                 value={price}
@@ -115,6 +121,14 @@ function ManualEntryModal({
             </View>
           </View>
 
+          {/* Live line total */}
+          {unitPrice > 0 && (
+            <View style={styles.modalTotalRow}>
+              <Text style={styles.modalTotalLabel}>Line total</Text>
+              <Text style={styles.modalTotalValue}>{formatPeso(lineTotal)}</Text>
+            </View>
+          )}
+
           <View style={styles.modalActions}>
             <TouchableOpacity style={styles.modalCancelBtn} onPress={handleClose}>
               <Text style={styles.modalCancelText}>Cancel</Text>
@@ -143,16 +157,20 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
     hasResult ? (scanner.structuredData?.confidence ?? 'low') : 'high';
   const cfg = CONFIDENCE_CONFIG[confidence];
 
+  // editPrice is a plain numeric string e.g. "52.00"
+  const unitPrice = parseFloat(scanner.editPrice) || 0;
+  const qty       = scanner.quantity ?? 1;
+  const lineTotal = unitPrice * qty;
+
   const canSave =
     !scanner.isContinuousMode &&
     scanner.editProduct &&
-    scanner.editPrice !== '---' &&
-    scanner.editPrice !== '';
+    unitPrice > 0;
 
   return (
     <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 8, 20) }]}>
 
-      {/* ── Top bar: drag handle + floating auto-save pill ── */}
+      {/* ── Top bar ── */}
       <View style={styles.topBar}>
         <View style={styles.dragHandle} />
         <TouchableOpacity
@@ -173,7 +191,7 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </TouchableOpacity>
       </View>
 
-      {/* ── Product + Price/Quantity cards ── */}
+      {/* ── Product + Price/Qty cards ── */}
       <View style={styles.infoRow}>
 
         {/* Product card */}
@@ -190,7 +208,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
               </View>
             )}
           </View>
-
           <TextInput
             style={[
               styles.productInput,
@@ -203,57 +220,72 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
             multiline
             numberOfLines={2}
           />
-
           {hasResult && <Text style={styles.editHint}>✎ Tap to edit</Text>}
         </View>
 
-        {/* Price + Quantity card */}
+        {/* Price + Qty card */}
         <View style={[styles.infoCard, styles.infoCardPrice]}>
           <View>
-            <Text style={styles.infoLabel}>PRICE</Text>
-            <TextInput
-              style={styles.priceInput}
-              value={scanner.editPrice}
-              onChangeText={scanner.setEditPrice}
-              placeholder="₱0.00"
-              placeholderTextColor="#C4C4C4"
-              keyboardType="decimal-pad"
-            />
+            <Text style={styles.infoLabel}>UNIT PRICE</Text>
+            {/* Show ₱ prefix inside the card, input holds plain number */}
+            <View style={styles.priceInputRow}>
+              <Text style={styles.pesoSymbol}>₱</Text>
+              <TextInput
+                style={styles.priceInput}
+                value={scanner.editPrice}
+                onChangeText={scanner.setEditPrice}
+                placeholder="0.00"
+                placeholderTextColor="#C4C4C4"
+                keyboardType="decimal-pad"
+              />
+            </View>
             {hasResult && <Text style={styles.editHint}>✎ Tap to edit</Text>}
           </View>
 
           <View style={styles.cardDivider} />
 
+          {/* Quantity stepper */}
           <View>
             <Text style={styles.infoLabel}>QTY</Text>
             <View style={styles.stepper}>
               <TouchableOpacity
                 style={styles.stepBtn}
-                onPress={() => scanner.setQuantity(Math.max(1, (scanner.quantity ?? 1) - 1))}
+                onPress={() => scanner.setQuantity(Math.max(1, qty - 1))}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Text style={styles.stepBtnText}>−</Text>
               </TouchableOpacity>
-              <Text style={styles.stepValue}>{scanner.quantity ?? 1}</Text>
+              <Text style={styles.stepValue}>{qty}</Text>
               <TouchableOpacity
                 style={styles.stepBtn}
-                onPress={() => scanner.setQuantity((scanner.quantity ?? 1) + 1)}
+                onPress={() => scanner.setQuantity(qty + 1)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Text style={styles.stepBtnText}>+</Text>
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Line total — only show when qty > 1 */}
+          {qty > 1 && unitPrice > 0 && (
+            <>
+              <View style={styles.cardDivider} />
+              <View>
+                <Text style={styles.infoLabel}>TOTAL</Text>
+                <Text style={styles.lineTotalText}>{formatPeso(lineTotal)}</Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
 
-      {/* ── Confidence hint banner ── */}
+      {/* ── Confidence hint ── */}
       {hasResult && confidence !== 'high' && (
         <View style={[styles.hintBanner, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
           <Text style={[styles.hintText, { color: cfg.border }]}>
             {confidence === 'medium'
               ? '⚠  Scanner isn\'t 100% sure — check the product name before saving.'
-              : '✎  Couldn\'t read the tag clearly. Please edit the product name above.'}
+              : '✎  Couldn\'t read clearly. Please edit the product name above.'}
           </Text>
         </View>
       )}
@@ -276,11 +308,10 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
             >
               <Text style={styles.btnText}>Save to List</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.scanAgainBtn}
               onPress={scanner.captureAndRead}
-              disabled={scanner.isProcessing || scanner.isModelLoading}
+              disabled={scanner.isProcessing}
               activeOpacity={0.75}
             >
               {scanner.isProcessing
@@ -291,20 +322,14 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
           </>
         ) : (
           <TouchableOpacity
-            style={[
-              styles.btn,
-              styles.btnScan,
-              (scanner.isModelLoading || scanner.isProcessing) && styles.btnDisabled,
-            ]}
+            style={[styles.btn, styles.btnScan, scanner.isProcessing && styles.btnDisabled]}
             onPress={scanner.captureAndRead}
-            disabled={scanner.isProcessing || scanner.isModelLoading}
+            disabled={scanner.isProcessing}
             activeOpacity={0.85}
           >
             {scanner.isProcessing
               ? <ActivityIndicator color="#FFFFFF" />
-              : scanner.isModelLoading
-                ? <Text style={styles.btnText}>⏳ Loading…</Text>
-                : <Text style={styles.btnText}>Scan Tag</Text>
+              : <Text style={styles.btnText}>Scan Tag</Text>
             }
           </TouchableOpacity>
         )}
@@ -321,7 +346,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </TouchableOpacity>
       </View>
 
-      {/* ── Manual Entry Modal ── */}
       <ManualEntryModal
         visible={showManual}
         onClose={() => setShowManual(false)}
@@ -338,8 +362,6 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     backgroundColor: '#F8F7F4',
   },
-
-  // ── Top bar ─────────────────────────────────────────────
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -367,303 +389,76 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  autoSavePillActive: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-  },
-  autoSaveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  autoSavePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#6B7280',
-    letterSpacing: 0.2,
-  },
-  autoSavePillTextActive: {
-    color: '#FFFFFF',
-  },
+  autoSavePillActive:     { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
+  autoSaveDot:            { width: 6, height: 6, borderRadius: 3 },
+  autoSavePillText:       { fontSize: 11, fontWeight: '700', color: '#6B7280', letterSpacing: 0.2 },
+  autoSavePillTextActive: { color: '#FFFFFF' },
 
-  // ── Info cards ──────────────────────────────────────────
-  infoRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-  },
-  infoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-  },
+  infoRow:         { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  infoCard:        { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, borderWidth: 1.5, borderColor: '#E5E7EB' },
   infoCardProduct: { flex: 1.6 },
   infoCardPrice:   { flex: 1, justifyContent: 'space-between' },
 
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  infoLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    letterSpacing: 0.8,
-  },
-  editHint: {
-    fontSize: 10,
-    color: '#C4C4C4',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
+  labelRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  infoLabel:     { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8 },
+  editHint:      { fontSize: 10, color: '#C4C4C4', marginTop: 4, fontStyle: 'italic' },
 
-  confidencePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 20,
-  },
-  confidencePillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
+  confidencePill:     { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 20 },
+  confidencePillText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.3 },
 
-  productInput: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    padding: 0,
-    lineHeight: 22,
-  },
-  priceInput: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#059669',
-    padding: 0,
-    marginTop: 4,
-  },
+  productInput: { fontSize: 16, fontWeight: '700', color: '#111827', padding: 0, lineHeight: 22 },
 
-  cardDivider: {
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    marginVertical: 10,
-  },
+  priceInputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  pesoSymbol:    { fontSize: 18, fontWeight: '800', color: '#059669', marginRight: 2 },
+  priceInput:    { fontSize: 22, fontWeight: '800', color: '#059669', padding: 0, flex: 1 },
 
-  // ── Quantity stepper (inside card) ──────────────────────
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
-  stepBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  stepBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#374151',
-    lineHeight: 20,
-  },
-  stepValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#111827',
-    minWidth: 24,
-    textAlign: 'center',
-  },
+  cardDivider:   { height: 1, backgroundColor: '#F3F4F6', marginVertical: 10 },
 
-  // ── Hint banner ─────────────────────────────────────────
-  hintBanner: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  hintText: {
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 18,
-  },
+  stepper:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
+  stepBtn:       { width: 28, height: 28, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  stepBtnText:   { fontSize: 16, fontWeight: '700', color: '#374151', lineHeight: 20 },
+  stepValue:     { fontSize: 18, fontWeight: '800', color: '#111827', minWidth: 24, textAlign: 'center' },
+  lineTotalText: { fontSize: 15, fontWeight: '800', color: '#059669', marginTop: 4 },
 
-  // ── Feedback pill ───────────────────────────────────────
-  feedbackPill: {
-    backgroundColor: '#ECFDF5',
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    alignSelf: 'center',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  feedbackText: {
-    color: '#059669',
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  hintBanner: { borderRadius: 12, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10 },
+  hintText:   { fontSize: 12, fontWeight: '600', lineHeight: 18 },
 
-  // ── Buttons ─────────────────────────────────────────────
-  ctaRow: { gap: 6, marginBottom: 8 },
-  btn: {
-    borderRadius: 18,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnScan:     { backgroundColor: '#4F46E5' },
-  btnSave:     { backgroundColor: '#059669' },
+  feedbackPill: { backgroundColor: '#ECFDF5', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, alignSelf: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#A7F3D0' },
+  feedbackText: { color: '#059669', fontSize: 13, fontWeight: '600' },
+
+  ctaRow:    { gap: 6, marginBottom: 8 },
+  btn:       { borderRadius: 18, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  btnScan:   { backgroundColor: '#4F46E5' },
+  btnSave:   { backgroundColor: '#059669' },
   btnDisabled: { backgroundColor: '#D1D5DB' },
-  btnText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  scanAgainBtn: {
-    alignSelf: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
-  },
-  scanAgainText: {
-    color: '#4F46E5',
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  btnText:   { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
 
-  // ── Footer ──────────────────────────────────────────────
-  footerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    gap: 12,
-  },
-  footerLink: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  footerLinkText: {
-    color: '#4F46E5',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  footerDivider: {
-    width: 1,
-    height: 14,
-    backgroundColor: '#D1D5DB',
-  },
+  scanAgainBtn:  { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
+  scanAgainText: { color: '#4F46E5', fontSize: 13, fontWeight: '700' },
 
-  // ── Manual Entry Modal ──────────────────────────────────
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  modalSheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 4,
-    marginTop: 8,
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    marginBottom: 20,
-  },
-  modalLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    letterSpacing: 0.8,
-    marginBottom: 6,
-  },
-  modalInput: {
-    backgroundColor: '#F8F7F4',
-    borderRadius: 14,
-    padding: 14,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 16,
-  },
-  modalInputPrice: {
-    color: '#059669',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  modalRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 4,
-  },
-  modalHalf: { flex: 1 },
-  stepperInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8F7F4',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 10,
-    marginBottom: 16,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-  },
-  modalCancelText: {
-    color: '#6B7280',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  modalConfirmBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#059669',
-    alignItems: 'center',
-  },
+  footerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 12 },
+  footerLink:    { paddingVertical: 4, paddingHorizontal: 8 },
+  footerLinkText:{ color: '#4F46E5', fontSize: 13, fontWeight: '600' },
+  footerDivider: { width: 1, height: 14, backgroundColor: '#D1D5DB' },
+
+  // ── Manual modal ──
+  modalBackdrop:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalSheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12 },
+  modalTitle:           { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 4, marginTop: 8 },
+  modalSubtitle:        { fontSize: 13, color: '#9CA3AF', marginBottom: 20 },
+  modalLabel:           { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8, marginBottom: 6 },
+  modalInput:           { backgroundColor: '#F8F7F4', borderRadius: 14, padding: 14, fontSize: 15, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 16 },
+  modalInputPrice:      { color: '#059669', fontSize: 18, fontWeight: '800' },
+  modalRow:             { flexDirection: 'row', gap: 12, marginBottom: 4 },
+  modalHalf:            { flex: 1 },
+  stepperInline:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8F7F4', borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', padding: 10, marginBottom: 16 },
+  modalTotalRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14, borderWidth: 1, borderColor: '#A7F3D0' },
+  modalTotalLabel:      { fontSize: 13, fontWeight: '600', color: '#059669' },
+  modalTotalValue:      { fontSize: 16, fontWeight: '800', color: '#059669' },
+  modalActions:         { flexDirection: 'row', gap: 10, marginTop: 8 },
+  modalCancelBtn:       { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#F3F4F6', alignItems: 'center' },
+  modalCancelText:      { color: '#6B7280', fontSize: 15, fontWeight: '600' },
+  modalConfirmBtn:      { flex: 2, paddingVertical: 14, borderRadius: 14, backgroundColor: '#059669', alignItems: 'center' },
   modalConfirmDisabled: { backgroundColor: '#D1D5DB' },
-  modalConfirmText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  modalConfirmText:     { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

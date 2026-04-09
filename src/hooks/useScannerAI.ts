@@ -16,7 +16,7 @@ export function useScannerAI(refreshInventory: () => void) {
   const [structuredData, setStructuredData] = useState<ParsedProduct | null>(null);
   const [editProduct, setEditProduct]       = useState('');
   const [editPrice, setEditPrice]           = useState('');
-  const [quantity, setQuantity]             = useState(1);   // ← new
+  const [quantity, setQuantity]             = useState(1);
 
   const [isTorchOn, setIsTorchOn]               = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
@@ -29,14 +29,19 @@ export function useScannerAI(refreshInventory: () => void) {
     })();
   }, []);
 
+  const resetResult = () => {
+    setStructuredData(null);
+    setEditProduct('');
+    setEditPrice('');
+    setQuantity(1);
+    setScanFeedback('');
+  };
+
   const captureAndRead = async () => {
     if (!cameraRef.current) return;
-
     try {
       setIsProcessing(true);
-      setStructuredData(null);
-      setScanFeedback('');
-      setQuantity(1);  // reset qty on each new scan
+      resetResult();
 
       const photo = await cameraRef.current.takePhoto({ flash: 'off' });
       const result = await TextRecognition.recognize(`file://${photo.path}`);
@@ -48,7 +53,6 @@ export function useScannerAI(refreshInventory: () => void) {
           photo.height,
         );
 
-        // Haptic quality signal
         if (parsedResults.confidence === 'high') {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } else if (parsedResults.confidence === 'medium') {
@@ -59,20 +63,18 @@ export function useScannerAI(refreshInventory: () => void) {
 
         setStructuredData(parsedResults);
         setEditProduct(parsedResults.product);
-        setEditPrice(parsedResults.price);
+        // editPrice holds the display string for the TextInput (e.g. "52.00")
+        // Strip the ₱ symbol so the user sees a plain number in the field
+        const numericStr = parsedResults.price.replace(/[^0-9.]/g, '');
+        setEditPrice(numericStr);
 
         if (isContinuousMode && parsedResults.price !== '---') {
           if (parsedResults.confidence === 'high') {
+            const unitPrice = parseFloat(numericStr) || 0;
             setScanFeedback(`✅ Auto-Saved: ${parsedResults.product}`);
-            await saveItemToDB(parsedResults.product, parsedResults.price);
+            await saveItemToDB(parsedResults.product, unitPrice, 1);
             refreshInventory();
-            setTimeout(() => {
-              setStructuredData(null);
-              setEditProduct('');
-              setEditPrice('');
-              setQuantity(1);
-              setScanFeedback('');
-            }, 1500);
+            setTimeout(resetResult, 1500);
           } else {
             setScanFeedback('⚠  Please verify before saving');
           }
@@ -91,13 +93,14 @@ export function useScannerAI(refreshInventory: () => void) {
     hasPermission,
     isModelLoading: false,
     isProcessing,
-    isTorchOn,       setIsTorchOn,
+    isTorchOn,        setIsTorchOn,
     isContinuousMode, setIsContinuousMode,
-    editProduct,     setEditProduct,
-    editPrice,       setEditPrice,
-    quantity,        setQuantity,       // ← exposed
+    editProduct,      setEditProduct,
+    editPrice,        setEditPrice,   // plain numeric string e.g. "52.00"
+    quantity,         setQuantity,
     scanFeedback,
     captureAndRead,
-    structuredData,  setStructuredData,
+    structuredData,   setStructuredData,
+    resetResult,
   };
 }
