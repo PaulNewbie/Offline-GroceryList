@@ -8,40 +8,93 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Path, Circle, Rect, Line, Polyline } from 'react-native-svg';
 
 import {
   getAllTrips, createTrip, deleteTrip,
   completeTrip, duplicateTripAsTemplate,
-  getTripItems, formatPrice, Trip,
+  getTripItems, formatPrice, setScannerTarget,
+  Trip,
 } from '../utils/database';
 
 const BUDGET_KEY     = 'grocery_budget';
 const DEFAULT_BUDGET = 2000;
 
-// ─── New List Modal — simple single step ─────────────────────────────────────
+// ─── Minimal SVG icons ────────────────────────────────────────────────────────
+
+function IconCamera({ size = 16, color = '#4F46E5' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <Rect x="2" y="5" width="18" height="14" rx="2" stroke={color} strokeWidth="1.8" />
+      <Circle cx="11" cy="12" r="3.5" stroke={color} strokeWidth="1.8" />
+      <Path d="M8 5V4C8 3.4 8.4 3 9 3H13C13.6 3 14 3.4 14 4V5"
+        stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function IconCheck({ size = 14, color = '#059669' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Polyline points="2,7 6,11 12,3" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function IconTrash({ size = 14, color = '#DC2626' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Polyline points="2,3 12,3" stroke={color} strokeWidth="1.6" strokeLinecap="round" />
+      <Path d="M5 3V2h4v1" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <Rect x="3" y="4" width="8" height="8" rx="1" stroke={color} strokeWidth="1.6" />
+      <Line x1="6" y1="6.5" x2="6" y2="10" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <Line x1="8" y1="6.5" x2="8" y2="10" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function IconCopy({ size = 14, color = '#6B7280' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Rect x="4" y="4" width="8" height="9" rx="1.2" stroke={color} strokeWidth="1.5" />
+      <Path d="M2 10V2.8C2 2.36 2.36 2 2.8 2H10" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function IconChevron({ size = 16, color = '#9CA3AF' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path d="M6 4l4 4-4 4" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+// ─── New List Modal ───────────────────────────────────────────────────────────
 function NewListModal({
   visible, onClose, onConfirm, defaultBudget,
 }: {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (name: string, store: string, budget: number) => void;
+  onConfirm: (name: string, store: string, budget: number, note: string) => void;
   defaultBudget: number;
 }) {
   const [name,   setName]   = useState('');
   const [store,  setStore]  = useState('');
   const [budget, setBudget] = useState(defaultBudget.toString());
+  const [note,   setNote]   = useState('');
 
   const canCreate = name.trim().length > 0;
 
   const handleClose = () => {
-    setName(''); setStore(''); setBudget(defaultBudget.toString());
+    setName(''); setStore(''); setBudget(defaultBudget.toString()); setNote('');
     onClose();
   };
 
   const handleCreate = () => {
     if (!canCreate) return;
-    onConfirm(name.trim(), store.trim(), parseFloat(budget) || DEFAULT_BUDGET);
-    setName(''); setStore(''); setBudget(defaultBudget.toString());
+    onConfirm(name.trim(), store.trim(), parseFloat(budget) || DEFAULT_BUDGET, note.trim());
+    setName(''); setStore(''); setBudget(defaultBudget.toString()); setNote('');
     onClose();
   };
 
@@ -62,10 +115,21 @@ function NewListModal({
             style={styles.modalInput}
             value={name}
             onChangeText={setName}
-            placeholder={`e.g. Weekly groceries, Adobo ingredients`}
+            placeholder="e.g. Weekly groceries, Adobo ingredients"
             placeholderTextColor="#C4C4C4"
             autoFocus
             returnKeyType="next"
+          />
+
+          <Text style={styles.modalLabel}>NOTE (optional)</Text>
+          <TextInput
+            style={[styles.modalInput, styles.modalInputNote]}
+            value={note}
+            onChangeText={setNote}
+            placeholder="e.g. For mom's birthday dinner"
+            placeholderTextColor="#C4C4C4"
+            returnKeyType="next"
+            multiline
           />
 
           <Text style={styles.modalLabel}>STORE (optional)</Text>
@@ -107,36 +171,62 @@ function NewListModal({
 }
 
 // ─── Trip card ────────────────────────────────────────────────────────────────
-function TripCard({ trip, onPress, onComplete, onDelete, onDuplicate }: {
+function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDuplicate, onSetScanner }: {
   trip: Trip & { itemCount: number; pricedCount: number; totalSpent: number };
+  isScannerTarget: boolean;
   onPress: () => void;
   onComplete: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onSetScanner: () => void;
 }) {
-  const isOverBudget = trip.totalSpent > trip.budget;
-  const pct          = Math.min((trip.totalSpent / trip.budget) * 100, 100);
+  const isOverBudget  = trip.totalSpent > trip.budget;
+  const pct           = Math.min((trip.totalSpent / trip.budget) * 100, 100);
   const unpricedCount = trip.itemCount - trip.pricedCount;
+  const isCompleted   = trip.status === 'completed';
 
   return (
-    <TouchableOpacity style={styles.tripCard} onPress={onPress} activeOpacity={0.85}>
-      {/* Status badge */}
+    <TouchableOpacity
+      style={[styles.tripCard, isScannerTarget && styles.tripCardTarget]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      {/* Top row: status dot + scanner badge + store */}
       <View style={styles.tripCardTop}>
-        <View style={[
-          styles.statusBadge,
-          trip.status === 'completed' && styles.statusBadgeDone,
-          trip.status === 'template'  && styles.statusBadgeTemplate,
-        ]}>
-          <Text style={styles.statusBadgeText}>
-            {trip.status === 'active'    ? '🟢 Active'
-           : trip.status === 'completed' ? '✅ Done'
-           : '📄 Template'}
+        <View style={styles.tripCardTopLeft}>
+          <View style={[
+            styles.statusDot,
+            trip.status === 'completed' && styles.statusDotDone,
+            trip.status === 'template'  && styles.statusDotTemplate,
+          ]} />
+          <Text style={styles.statusText}>
+            {trip.status === 'active'    ? 'Active'
+           : trip.status === 'completed' ? 'Done'
+           : 'Template'}
           </Text>
         </View>
-        {trip.store ? <Text style={styles.tripStore}>📍 {trip.store}</Text> : null}
+        <View style={styles.tripCardTopRight}>
+          {isScannerTarget && (
+            <View style={styles.scannerTargetBadge}>
+              <IconCamera size={11} color="#4F46E5" />
+              <Text style={styles.scannerTargetText}>Scanner</Text>
+            </View>
+          )}
+          {trip.store ? (
+            <Text style={styles.tripStore}>{trip.store}</Text>
+          ) : null}
+        </View>
       </View>
 
+      {/* Name */}
       <Text style={styles.tripName}>{trip.name}</Text>
+
+      {/* Note */}
+      {trip.note ? (
+        <Text style={styles.tripNote} numberOfLines={2}>{trip.note}</Text>
+      ) : null}
+
+      {/* Date */}
       <Text style={styles.tripDate}>
         {new Date(trip.created_at).toLocaleDateString('en-PH', {
           month: 'long', day: 'numeric', year: 'numeric',
@@ -145,12 +235,12 @@ function TripCard({ trip, onPress, onComplete, onDelete, onDuplicate }: {
 
       {/* Item summary */}
       <Text style={styles.tripMeta}>
-        {trip.itemCount} items
+        {trip.itemCount} {trip.itemCount === 1 ? 'item' : 'items'}
         {trip.pricedCount > 0 ? ` · ${trip.pricedCount} priced` : ''}
-        {unpricedCount > 0    ? ` · ${unpricedCount} no price yet` : ''}
+        {unpricedCount > 0    ? ` · ${unpricedCount} no price` : ''}
       </Text>
 
-      {/* Budget bar — only when at least one item has a price */}
+      {/* Budget bar */}
       {trip.pricedCount > 0 && (
         <>
           <View style={styles.tripBarBg}>
@@ -166,29 +256,52 @@ function TripCard({ trip, onPress, onComplete, onDelete, onDuplicate }: {
         </>
       )}
 
+      {/* Divider */}
+      <View style={styles.actionDivider} />
+
       {/* Actions */}
       <View style={styles.tripActions}>
+        {/* Set as scanner target — available for active + template */}
+        {!isCompleted && !isScannerTarget && (
+          <TouchableOpacity style={styles.actionBtn} onPress={onSetScanner}>
+            <IconCamera size={13} color="#4F46E5" />
+            <Text style={[styles.actionBtnText, { color: '#4F46E5' }]}>Use for Scanner</Text>
+          </TouchableOpacity>
+        )}
         {trip.status === 'active' && (
           <TouchableOpacity style={styles.actionBtn} onPress={onComplete}>
-            <Text style={styles.actionBtnText}>✅ Complete</Text>
+            <IconCheck size={13} color="#059669" />
+            <Text style={[styles.actionBtnText, { color: '#059669' }]}>Complete</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity style={styles.actionBtn} onPress={onDuplicate}>
-          <Text style={styles.actionBtnText}>📄 Save as template</Text>
+          <IconCopy size={13} color="#6B7280" />
+          <Text style={styles.actionBtnText}>Save as template</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDelete]} onPress={onDelete}>
-          <Text style={styles.actionBtnDeleteText}>🗑 Delete</Text>
+          <IconTrash size={13} color="#DC2626" />
+          <Text style={[styles.actionBtnText, styles.actionBtnDeleteText]}>Delete</Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
 }
 
+// ─── Section header ────────────────────────────────────────────────────────────
+function SectionHeader({ label, accent }: { label: string; accent: string }) {
+  return (
+    <View style={[styles.sectionHeader, { borderLeftColor: accent }]}>
+      <Text style={styles.sectionHeaderText}>{label}</Text>
+    </View>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function ListsScreen({ navigation }: any) {
-  const [trips,         setTrips]         = useState<any[]>([]);
-  const [showNewList,   setShowNewList]   = useState(false);
-  const [defaultBudget, setDefaultBudget] = useState(DEFAULT_BUDGET);
+  const [trips,           setTrips]           = useState<any[]>([]);
+  const [showNewList,     setShowNewList]      = useState(false);
+  const [defaultBudget,   setDefaultBudget]   = useState(DEFAULT_BUDGET);
+  const [scannerTargetId, setScannerTargetId] = useState<number | null>(null);
   const isFocused = useIsFocused();
 
   const load = useCallback(async () => {
@@ -203,13 +316,17 @@ export default function ListsScreen({ navigation }: any) {
       return { ...trip, itemCount: items.length, pricedCount: priced.length, totalSpent };
     }));
     setTrips(enriched);
+
+    // Find scanner target
+    const target = enriched.find(t => t.is_scanner_target === 1);
+    setScannerTargetId(target?.id ?? null);
   }, []);
 
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
 
   // ── Handlers ────────────────────────────────────────────
-  const handleCreate = async (name: string, store: string, budget: number) => {
-    const id = await createTrip(name, budget, store || undefined);
+  const handleCreate = async (name: string, store: string, budget: number, note: string) => {
+    const id = await createTrip(name, budget, store || undefined, 'active', note || undefined);
     load();
     if (id) navigation.navigate('TripDetail', { tripId: id });
   };
@@ -235,54 +352,82 @@ export default function ListsScreen({ navigation }: any) {
     Alert.alert('Saved as Template', `"${newName}" is ready to reuse.`);
   };
 
+  const handleSetScanner = async (trip: Trip) => {
+    await setScannerTarget(trip.id);
+    setScannerTargetId(trip.id);
+    load();
+  };
+
   // Group
   const active    = trips.filter(t => t.status === 'active');
   const templates = trips.filter(t => t.status === 'template');
   const completed = trips.filter(t => t.status === 'completed');
 
-  const sections = [
-    ...(active.length    ? [{ title: '🟢 Active',    data: active }]    : []),
-    ...(templates.length ? [{ title: '📄 Templates', data: templates }] : []),
-    ...(completed.length ? [{ title: '✅ History',   data: completed }] : []),
-  ];
+  const renderCard = (trip: any) => (
+    <TripCard
+      key={trip.id}
+      trip={trip}
+      isScannerTarget={trip.id === scannerTargetId}
+      onPress={() => navigation.navigate('TripDetail', { tripId: trip.id })}
+      onComplete={() => handleComplete(trip)}
+      onDelete={() => handleDelete(trip)}
+      onDuplicate={() => handleDuplicate(trip)}
+      onSetScanner={() => handleSetScanner(trip)}
+    />
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <FlatList
-        data={sections}
-        keyExtractor={(_, i) => i.toString()}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
+        data={[]}
+        keyExtractor={() => 'dummy'}
+        renderItem={null}
         ListHeaderComponent={
-          <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewList(true)} activeOpacity={0.85}>
-            <Text style={styles.newBtnText}>+ New Shopping List</Text>
-          </TouchableOpacity>
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📋</Text>
-            <Text style={styles.emptyTitle}>No lists yet</Text>
-            <Text style={styles.emptyBody}>
-              Create a list and start adding items.{'\n'}
-              Prices are always optional.
-            </Text>
+          <View style={styles.listContent}>
+            {/* New list button */}
+            <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewList(true)} activeOpacity={0.85}>
+              <Text style={styles.newBtnText}>+ New Shopping List</Text>
+            </TouchableOpacity>
+
+            {/* Empty state */}
+            {trips.length === 0 && (
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>📋</Text>
+                <Text style={styles.emptyTitle}>No lists yet</Text>
+                <Text style={styles.emptyBody}>
+                  Create a list and start adding items.{'\n'}
+                  Prices are always optional.
+                </Text>
+              </View>
+            )}
+
+            {/* Active section */}
+            {active.length > 0 && (
+              <View style={styles.section}>
+                <SectionHeader label="Active" accent="#4F46E5" />
+                {active.map(renderCard)}
+              </View>
+            )}
+
+            {/* Templates section */}
+            {templates.length > 0 && (
+              <View style={styles.section}>
+                <SectionHeader label="Templates" accent="#D97706" />
+                {templates.map(renderCard)}
+              </View>
+            )}
+
+            {/* History section */}
+            {completed.length > 0 && (
+              <View style={styles.section}>
+                <SectionHeader label="History" accent="#9CA3AF" />
+                {completed.map(renderCard)}
+              </View>
+            )}
           </View>
         }
-        renderItem={({ item: section }) => (
-          <View>
-            <Text style={styles.groupTitle}>{section.title}</Text>
-            {section.data.map((trip: any) => (
-              <TripCard
-                key={trip.id}
-                trip={trip}
-                onPress={() => navigation.navigate('TripDetail', { tripId: trip.id })}
-                onComplete={() => handleComplete(trip)}
-                onDelete={() => handleDelete(trip)}
-                onDuplicate={() => handleDuplicate(trip)}
-              />
-            ))}
-          </View>
-        )}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
       />
 
       <NewListModal
@@ -297,43 +442,78 @@ export default function ListsScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#F8F7F4' },
-  listContent: { padding: 14, paddingBottom: 40 },
+  listContent: { padding: 14 },
 
-  newBtn:     { backgroundColor: '#4F46E5', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginBottom: 16 },
+  newBtn:     { backgroundColor: '#4F46E5', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginBottom: 20 },
   newBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 
-  groupTitle: { fontSize: 13, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.5, marginBottom: 8, marginTop: 4 },
+  // ── Section ──────────────────────────────────────────────
+  section:           { marginBottom: 8 },
+  sectionHeader:     { borderLeftWidth: 3, paddingLeft: 10, marginBottom: 10, marginTop: 4 },
+  sectionHeaderText: { fontSize: 12, fontWeight: '800', color: '#374151', letterSpacing: 0.4, textTransform: 'uppercase' },
 
-  tripCard:    { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-  tripCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  // ── Trip card ────────────────────────────────────────────
+  tripCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  tripCardTarget: {
+    borderColor: '#C7D2FE',
+    backgroundColor: '#FAFAFE',
+  },
 
-  statusBadge:         { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: '#F0FDF4' },
-  statusBadgeDone:     { backgroundColor: '#F0FDF4' },
-  statusBadgeTemplate: { backgroundColor: '#F8F7F4' },
-  statusBadgeText:     { fontSize: 12, fontWeight: '700', color: '#374151' },
+  tripCardTop:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  tripCardTopLeft:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  tripCardTopRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
-  tripStore: { fontSize: 11, color: '#9CA3AF' },
-  tripName:  { fontSize: 17, fontWeight: '800', color: '#111827', marginBottom: 2 },
-  tripDate:  { fontSize: 12, color: '#C4C4C4', marginBottom: 8 },
+  statusDot:         { width: 7, height: 7, borderRadius: 4, backgroundColor: '#4F46E5' },
+  statusDotDone:     { backgroundColor: '#059669' },
+  statusDotTemplate: { backgroundColor: '#D97706' },
+  statusText:        { fontSize: 12, fontWeight: '600', color: '#6B7280' },
+
+  scannerTargetBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  scannerTargetText: { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
+
+  tripStore: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+  tripName:  { fontSize: 17, fontWeight: '800', color: '#111827', marginBottom: 4 },
+  tripNote:  { fontSize: 13, color: '#6B7280', marginBottom: 6, lineHeight: 18, fontStyle: 'italic' },
+  tripDate:  { fontSize: 11, color: '#C4C4C4', marginBottom: 6 },
   tripMeta:  { fontSize: 13, color: '#6B7280', marginBottom: 10 },
 
-  tripBarBg:   { height: 5, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
+  tripBarBg:   { height: 4, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
   tripBarFill: { height: '100%', borderRadius: 3 },
-  tripSpent:   { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 12 },
+  tripSpent:   { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 2 },
   tripBudget:  { fontSize: 13, color: '#9CA3AF', fontWeight: '400' },
 
-  tripActions:       { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  actionBtn:         { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F3F4F6' },
-  actionBtnText:     { fontSize: 12, fontWeight: '600', color: '#374151' },
-  actionBtnDelete:   { backgroundColor: '#FEF2F2' },
-  actionBtnDeleteText: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
+  actionDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
 
+  tripActions:         { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  actionBtn:           { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  actionBtnText:       { fontSize: 12, fontWeight: '600', color: '#374151' },
+  actionBtnDelete:     { backgroundColor: '#FEF2F2' },
+  actionBtnDeleteText: { color: '#DC2626' },
+
+  // ── Empty ────────────────────────────────────────────────
   empty:     { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyTitle:{ fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 6 },
   emptyBody: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', lineHeight: 22 },
 
-  // Modal
+  // ── Modal ────────────────────────────────────────────────
   modalBackdrop:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   modalSheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
   dragHandle:           { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
@@ -341,6 +521,7 @@ const styles = StyleSheet.create({
   modalSub:             { fontSize: 13, color: '#9CA3AF', marginBottom: 24 },
   modalLabel:           { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8, marginBottom: 6 },
   modalInput:           { backgroundColor: '#F8F7F4', borderRadius: 14, padding: 14, fontSize: 15, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 14 },
+  modalInputNote:       { minHeight: 60, textAlignVertical: 'top', fontWeight: '400', fontStyle: 'italic' },
   modalInputPrice:      { color: '#059669', fontWeight: '800' },
   modalActions:         { flexDirection: 'row', gap: 10, marginTop: 4 },
   modalCancelBtn:       { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#F3F4F6', alignItems: 'center' },

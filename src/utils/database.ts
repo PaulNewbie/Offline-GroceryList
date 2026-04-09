@@ -8,20 +8,23 @@ const db = SQLite.openDatabaseSync('buyoyo_offline.db');
 export type TripStatus = 'active' | 'completed' | 'template';
 
 export interface Trip {
-  id:           number;
-  name:         string;
-  store:        string | null;
-  budget:       number;
-  status:       TripStatus;
-  scheduled_at: string | null;
-  created_at:   string;
-  completed_at: string | null;
+  id:                number;
+  name:              string;
+  note:              string | null;
+  store:             string | null;
+  budget:            number;
+  status:            TripStatus;
+  is_scanner_target: number; // 0 | 1
+  scheduled_at:      string | null;
+  created_at:        string;
+  completed_at:      string | null;
 }
 
 export interface TripItem {
   id:         number;
   trip_id:    number;
   product:    string;
+  note:       string | null;
   price:      string;       // formatted display e.g. "₱52.00" or "---"
   unit_price: number;       // 0 means no price set yet
   quantity:   number;
@@ -63,14 +66,16 @@ export const initDatabase = async () => {
     // ── Create tables ─────────────────────────────────────────────────────────
     await db.execAsync(`
       CREATE TABLE IF NOT EXISTS Trips (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        name         TEXT NOT NULL,
-        store        TEXT,
-        budget       REAL DEFAULT 2000,
-        status       TEXT DEFAULT 'active',
-        scheduled_at DATETIME,
-        created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-        completed_at DATETIME
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        name              TEXT NOT NULL,
+        note              TEXT,
+        store             TEXT,
+        budget            REAL DEFAULT 2000,
+        status            TEXT DEFAULT 'active',
+        is_scanner_target INTEGER DEFAULT 0,
+        scheduled_at      DATETIME,
+        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at      DATETIME
       );
     `);
 
@@ -79,6 +84,7 @@ export const initDatabase = async () => {
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         trip_id    INTEGER NOT NULL REFERENCES Trips(id) ON DELETE CASCADE,
         product    TEXT NOT NULL,
+        note       TEXT,
         price      TEXT NOT NULL DEFAULT '---',
         unit_price REAL DEFAULT 0,
         quantity   INTEGER DEFAULT 1,
@@ -98,12 +104,13 @@ export const initDatabase = async () => {
       );
     `);
 
-    // ── Safe column migrations for installs that have old schemas ─────────────
-    await addColumnIfMissing('TripItems', 'added_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-    // Remove stale columns gracefully — SQLite can't DROP COLUMN before 3.35,
-    // so we just ignore is_planned / note if they exist; they cause no harm.
+    // ── Safe column migrations ─────────────────────────────────────────────────
+    await addColumnIfMissing('Trips',     'note',              'TEXT');
+    await addColumnIfMissing('Trips',     'is_scanner_target', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('TripItems', 'note',              'TEXT');
+    await addColumnIfMissing('TripItems', 'added_at',          'DATETIME DEFAULT CURRENT_TIMESTAMP');
 
-    // ── Migrate old ScannedItems table (very first version of the app) ────────
+    // ── Migrate old ScannedItems table ────────────────────────────────────────
     if (await tableExists('ScannedItems')) {
       await addColumnIfMissing('ScannedItems', 'unit_price', 'REAL DEFAULT 0');
       await addColumnIfMissing('ScannedItems', 'quantity',   'INTEGER DEFAULT 1');
@@ -136,23 +143,67 @@ export const initDatabase = async () => {
       await db.execAsync('DROP TABLE IF EXISTS ScannedItems;');
     }
 
-    // ── Ensure at least one active list exists (for the scanner) ──────────────
+    // ── Ensure at least one active list exists ────────────────────────────────
     const cnt = await db.getFirstAsync<{ cnt: number }>(
       `SELECT COUNT(*) as cnt FROM Trips WHERE status = 'active'`,
     );
-    console.log('[DB] Active trips count:', cnt?.cnt);
     if ((cnt?.cnt ?? 0) === 0) {
       const newId = await db.runAsync(
-        `INSERT INTO Trips (name, status) VALUES (?, 'active')`,
+        `INSERT INTO Trips (name, status, is_scanner_target) VALUES (?, 'active', 1)`,
         [`My List — ${new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`],
       );
       console.log('[DB] Created default active trip id:', newId.lastInsertRowId);
+    }
+
+    // ── Ensure exactly one scanner target exists ──────────────────────────────
+    const targetCnt = await db.getFirstAsync<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM Trips WHERE is_scanner_target = 1`,
+    );
+    if ((targetCnt?.cnt ?? 0) === 0) {
+      // Pin the most recent active list
+      await db.execAsync(`
+        UPDATE Trips SET is_scanner_target = 1
+        WHERE id = (
+          SELECT id FROM Trips
+          WHERE status IN ('active', 'template')
+          ORDER BY created_at DESC
+          LIMIT 1
+        )
+      `);
     }
 
     console.log('[DB] Ready ✓');
   } catch (e) {
     console.error('[DB] Init error:', e);
   }
+};
+
+// ─── SCANNER TARGET ───────────────────────────────────────────────────────────
+
+/** Pin a specific list as the scanner target. Clears all others. */
+export const setScannerTarget = async (id: number): Promise<boolean> => {
+  try {
+    await db.runAsync(`UPDATE Trips SET is_scanner_target = 0`);
+    await db.runAsync(`UPDATE Trips SET is_scanner_target = 1 WHERE id = ?`, [id]);
+    return true;
+  } catch (e) { console.error('[DB] setScannerTarget:', e); return false; }
+};
+
+/**
+ * Get the pinned scanner-target list.
+ * Falls back to the most-recent active list if nothing is pinned.
+ */
+export const getScannerTarget = async (): Promise<Trip | null> => {
+  try {
+    const pinned = await db.getFirstAsync<Trip>(
+      `SELECT * FROM Trips WHERE is_scanner_target = 1 LIMIT 1`,
+    );
+    if (pinned) return pinned;
+    // Fallback
+    return await db.getFirstAsync<Trip>(
+      `SELECT * FROM Trips WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`,
+    );
+  } catch (e) { return null; }
 };
 
 // ─── TRIPS ────────────────────────────────────────────────────────────────────
@@ -169,25 +220,20 @@ export const getTripById = async (id: number): Promise<Trip | null> => {
   } catch (e) { return null; }
 };
 
-// The scanner always saves into the most-recently-created active list
-export const getActiveTrip = async (): Promise<Trip | null> => {
-  try {
-    return await db.getFirstAsync<Trip>(
-      `SELECT * FROM Trips WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`,
-    );
-  } catch (e) { return null; }
-};
+/** @deprecated use getScannerTarget() instead */
+export const getActiveTrip = async (): Promise<Trip | null> => getScannerTarget();
 
 export const createTrip = async (
   name: string,
   budget: number = 2000,
   store?: string,
   status: TripStatus = 'active',
+  note?: string,
 ): Promise<number | null> => {
   try {
     const r = await db.runAsync(
-      `INSERT INTO Trips (name, store, budget, status) VALUES (?, ?, ?, ?)`,
-      [name, store ?? null, budget, status],
+      `INSERT INTO Trips (name, note, store, budget, status) VALUES (?, ?, ?, ?, ?)`,
+      [name, note ?? null, store ?? null, budget, status],
     );
     return r.lastInsertRowId;
   } catch (e) { console.error('[DB] createTrip:', e); return null; }
@@ -195,7 +241,7 @@ export const createTrip = async (
 
 export const updateTrip = async (
   id: number,
-  fields: Partial<Pick<Trip, 'name' | 'store' | 'budget' | 'status' | 'completed_at'>>,
+  fields: Partial<Pick<Trip, 'name' | 'note' | 'store' | 'budget' | 'status' | 'completed_at'>>,
 ): Promise<boolean> => {
   try {
     const keys = Object.keys(fields);
@@ -220,12 +266,11 @@ export const duplicateTripAsTemplate = async (tripId: number, newName: string): 
   try {
     const trip = await getTripById(tripId);
     if (!trip) return null;
-    const newId = await createTrip(newName, trip.budget, trip.store ?? undefined, 'template');
+    const newId = await createTrip(newName, trip.budget, trip.store ?? undefined, 'template', trip.note ?? undefined);
     if (!newId) return null;
     const items = await getTripItems(tripId);
-    // Copy items without prices (it's a template / checklist skeleton)
     for (const item of items) {
-      await addItem(newId, item.product);
+      await addItem(newId, item.product, 0, 1, item.note ?? undefined);
     }
     return newId;
   } catch (e) { return null; }
@@ -238,7 +283,6 @@ export const getTripItems = async (tripId: number): Promise<TripItem[]> => {
     const rows = await db.getAllAsync<TripItem>(
       `SELECT * FROM TripItems WHERE trip_id = ? ORDER BY id ASC`, [tripId],
     );
-    console.log('[DB] getTripItems tripId:', tripId, '| count:', rows.length);
     return rows;
   } catch (e) {
     console.error('[DB] getTripItems error:', e);
@@ -246,25 +290,21 @@ export const getTripItems = async (tripId: number): Promise<TripItem[]> => {
   }
 };
 
-// Add any item — price is optional (defaults to 0 / '---' = not set yet)
 export const addItem = async (
   tripId: number,
   product: string,
   unitPrice: number = 0,
   quantity: number = 1,
+  note?: string,
 ): Promise<number | null> => {
   try {
-    if (!tripId) {
-      console.error('[DB] addItem: invalid tripId', tripId);
-      return null;
-    }
+    if (!tripId) { console.error('[DB] addItem: invalid tripId', tripId); return null; }
     const price = unitPrice > 0 ? formatPrice(unitPrice) : '---';
     const r = await db.runAsync(
-      `INSERT INTO TripItems (trip_id, product, price, unit_price, quantity)
-       VALUES (?, ?, ?, ?, ?)`,
-      [tripId, product.trim(), price, unitPrice, quantity],
+      `INSERT INTO TripItems (trip_id, product, note, price, unit_price, quantity)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [tripId, product.trim(), note ?? null, price, unitPrice, quantity],
     );
-    console.log('[DB] addItem inserted rowId:', r.lastInsertRowId, 'tripId:', tripId, 'product:', product);
     if (unitPrice > 0) upsertCatalogue(product, unitPrice).catch(() => {});
     return r.lastInsertRowId;
   } catch (e) {
@@ -273,18 +313,18 @@ export const addItem = async (
   }
 };
 
-// Update an existing item (name + price + qty)
 export const updateItem = async (
   id: number,
   product: string,
   unitPrice: number,
   quantity: number,
+  note?: string,
 ): Promise<boolean> => {
   try {
     const price = unitPrice > 0 ? formatPrice(unitPrice) : '---';
     await db.runAsync(
-      `UPDATE TripItems SET product=?, price=?, unit_price=?, quantity=?, is_synced=0 WHERE id=?`,
-      [product.trim(), price, unitPrice, quantity, id],
+      `UPDATE TripItems SET product=?, note=?, price=?, unit_price=?, quantity=?, is_synced=0 WHERE id=?`,
+      [product.trim(), note ?? null, price, unitPrice, quantity, id],
     );
     if (unitPrice > 0) upsertCatalogue(product, unitPrice).catch(() => {});
     return true;
@@ -335,21 +375,20 @@ export const searchCatalogue = async (query: string): Promise<CatalogueEntry[]> 
   } catch (e) { return []; }
 };
 
-// ─── LEGACY SHIMS (keep ScannerScreen working unchanged) ─────────────────────
+// ─── LEGACY SHIMS ─────────────────────────────────────────────────────────────
 
 export const saveItemToDB = async (product: string, unitPrice: number, quantity = 1) => {
-  const trip = await getActiveTrip();
+  const trip = await getScannerTarget();
   if (!trip) return null;
   return addItem(trip.id, product, unitPrice, quantity);
 };
 
-export const getOfflineItems  = async () => { const t = await getActiveTrip(); return t ? getTripItems(t.id) : []; };
+export const getOfflineItems  = async () => { const t = await getScannerTarget(); return t ? getTripItems(t.id) : []; };
 export const updateItemInDB   = (id: number, p: string, up: number, q: number) => updateItem(id, p, up, q);
 export const deleteItemFromDB = (id: number) => deleteItem(id);
 
-// Keep old name used by TripDetailScreen
-export const saveTripItem    = addItem;
-export const updateTripItem  = updateItem;
-export const deleteTripItem  = deleteItem;
+export const saveTripItem          = addItem;
+export const updateTripItem        = updateItem;
+export const deleteTripItem        = deleteItem;
 export const toggleTripItemChecked = toggleItemChecked;
-export const clearTripItems  = clearItems;
+export const clearTripItems        = clearItems;

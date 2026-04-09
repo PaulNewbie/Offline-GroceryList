@@ -9,6 +9,7 @@ import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import Svg, { Path, Polyline, Rect, Line, Circle } from 'react-native-svg';
 
 import {
   getTripById, getTripItems, addItem,
@@ -17,6 +18,36 @@ import {
   updateTrip, formatPrice,
   Trip, TripItem,
 } from '../utils/database';
+
+// ─── Minimal SVG icons ────────────────────────────────────────────────────────
+
+function IconCheck({ size = 13, color = '#059669' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Polyline points="2,7 6,11 12,3" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function IconEdit({ size = 14, color = '#4F46E5' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Path d="M9.5 2L12 4.5L5 11.5H2.5V9L9.5 2Z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function IconTrash({ size = 14, color = '#DC2626' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <Polyline points="2,3 12,3" stroke={color} strokeWidth="1.6" strokeLinecap="round" />
+      <Path d="M5 3V2h4v1" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <Rect x="3" y="4" width="8" height="8" rx="1" stroke={color} strokeWidth="1.6" />
+      <Line x1="6" y1="6.5" x2="6" y2="10" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <Line x1="8" y1="6.5" x2="8" y2="10" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </Svg>
+  );
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const hasPriceSet = (item: TripItem) => item.unit_price > 0;
@@ -29,8 +60,10 @@ function SwipeDeleteAction(
   const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1], extrapolate: 'clamp' });
   return (
     <TouchableOpacity style={styles.swipeDelete} onPress={onDelete} activeOpacity={0.85}>
-      <Animated.Text style={{ transform: [{ scale }], fontSize: 20 }}>🗑</Animated.Text>
-      <Animated.Text style={[styles.swipeLabel, { transform: [{ scale }] }]}>Delete</Animated.Text>
+      <Animated.View style={{ transform: [{ scale }], alignItems: 'center' }}>
+        <IconTrash size={18} color="#FFFFFF" />
+        <Animated.Text style={styles.swipeLabel}>Delete</Animated.Text>
+      </Animated.View>
     </TouchableOpacity>
   );
 }
@@ -42,8 +75,10 @@ function SwipeEditAction(
   const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1], extrapolate: 'clamp' });
   return (
     <TouchableOpacity style={styles.swipeEdit} onPress={onEdit} activeOpacity={0.85}>
-      <Animated.Text style={{ transform: [{ scale }], fontSize: 20 }}>✎</Animated.Text>
-      <Animated.Text style={[styles.swipeLabel, { transform: [{ scale }] }]}>Edit</Animated.Text>
+      <Animated.View style={{ transform: [{ scale }], alignItems: 'center' }}>
+        <IconEdit size={18} color="#FFFFFF" />
+        <Animated.Text style={styles.swipeLabel}>Edit</Animated.Text>
+      </Animated.View>
     </TouchableOpacity>
   );
 }
@@ -55,27 +90,28 @@ interface RowProps {
   onEdit: (item: TripItem) => void;
   onDelete: (id: number, name: string) => void;
   onToggle: (id: number, checked: boolean) => void;
-  onSave: (id: number, product: string, unitPrice: number, qty: number) => void;
+  onSave: (id: number, product: string, unitPrice: number, qty: number, note: string) => void;
   onCancel: () => void;
   onAddPrice: (item: TripItem) => void;
 }
 
 function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel, onAddPrice }: RowProps) {
-  const swipeRef   = useRef<Swipeable>(null);
-  const isEditing  = editingId === item.id;
-  const isChecked  = item.is_checked === 1;
-  const hasPrice   = hasPriceSet(item);
-  const lineTotal  = (item.unit_price ?? 0) * (item.quantity ?? 1);
+  const swipeRef  = useRef<Swipeable>(null);
+  const isEditing = editingId === item.id;
+  const isChecked = item.is_checked === 1;
+  const hasPrice  = hasPriceSet(item);
+  const lineTotal = (item.unit_price ?? 0) * (item.quantity ?? 1);
 
-  // Local edit state
   const [editProduct, setEditProduct] = useState(item.product);
   const [editPrice,   setEditPrice]   = useState(item.unit_price > 0 ? item.unit_price.toFixed(2) : '');
   const [editQty,     setEditQty]     = useState(item.quantity ?? 1);
+  const [editNote,    setEditNote]    = useState(item.note ?? '');
 
   useEffect(() => {
     setEditProduct(item.product);
     setEditPrice(item.unit_price > 0 ? item.unit_price.toFixed(2) : '');
     setEditQty(item.quantity ?? 1);
+    setEditNote(item.note ?? '');
   }, [item]);
 
   const editUnitPrice = parseFloat(editPrice) || 0;
@@ -124,6 +160,16 @@ function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel
           </View>
         </View>
 
+        <Text style={styles.editCardLabel}>NOTE (optional)</Text>
+        <TextInput
+          style={[styles.editInput, styles.editInputNote]}
+          value={editNote}
+          onChangeText={setEditNote}
+          placeholder="e.g. Buy the big one, check expiry"
+          placeholderTextColor="#C4C4C4"
+          multiline
+        />
+
         {editUnitPrice > 0 && editQty > 1 && (
           <View style={styles.editPreviewRow}>
             <Text style={styles.editPreviewLabel}>Line total</Text>
@@ -137,7 +183,7 @@ function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-            onPress={() => canSave && onSave(item.id, editProduct.trim(), editUnitPrice, editQty)}
+            onPress={() => canSave && onSave(item.id, editProduct.trim(), editUnitPrice, editQty, editNote.trim())}
             disabled={!canSave}
           >
             <Text style={styles.saveBtnText}>Save</Text>
@@ -166,20 +212,23 @@ function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel
       >
         {/* Checkbox */}
         <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
-          {isChecked && <Text style={styles.checkmark}>✓</Text>}
+          {isChecked && <IconCheck size={11} color="#FFFFFF" />}
         </View>
 
-        {/* Name + meta */}
+        {/* Name + note */}
         <View style={styles.cardMiddle}>
           <Text style={[styles.productName, isChecked && styles.productNameChecked]} numberOfLines={2}>
             {item.product}
           </Text>
+          {item.note ? (
+            <Text style={styles.itemNote} numberOfLines={1}>{item.note}</Text>
+          ) : null}
           {hasPrice && item.quantity > 1 && (
             <Text style={styles.unitPriceHint}>{formatPrice(item.unit_price)} each</Text>
           )}
         </View>
 
-        {/* Right side — price or + Add Price */}
+        {/* Right side */}
         <View style={styles.cardRight}>
           {hasPrice ? (
             <>
@@ -193,7 +242,6 @@ function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel
               )}
             </>
           ) : (
-            // No price set yet — show a clear call-to-action
             <TouchableOpacity
               style={styles.addPriceBtn}
               onPress={() => onAddPrice(item)}
@@ -208,6 +256,86 @@ function ItemRow({ item, editingId, onEdit, onDelete, onToggle, onSave, onCancel
   );
 }
 
+// ─── Editable trip header ─────────────────────────────────────────────────────
+function TripHeader({
+  trip,
+  onSaveMeta,
+}: {
+  trip: Trip;
+  onSaveMeta: (name: string, note: string) => void;
+}) {
+  const [editing, setEditing]   = useState(false);
+  const [name,    setName]      = useState(trip.name);
+  const [note,    setNote]      = useState(trip.note ?? '');
+
+  useEffect(() => {
+    setName(trip.name);
+    setNote(trip.note ?? '');
+  }, [trip]);
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSaveMeta(name.trim(), note.trim());
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <View style={styles.metaEditCard}>
+        <Text style={styles.editCardLabel}>LIST NAME</Text>
+        <TextInput
+          style={styles.metaNameInput}
+          value={name}
+          onChangeText={setName}
+          autoFocus
+          placeholder="List name"
+          placeholderTextColor="#C4C4C4"
+          returnKeyType="next"
+        />
+        <Text style={styles.editCardLabel}>NOTE (optional)</Text>
+        <TextInput
+          style={[styles.metaNameInput, styles.metaNoteInput]}
+          value={note}
+          onChangeText={setNote}
+          placeholder="Add a note about this list…"
+          placeholderTextColor="#C4C4C4"
+          multiline
+          returnKeyType="done"
+          onSubmitEditing={handleSave}
+        />
+        <View style={styles.editActions}>
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => { setEditing(false); setName(trip.name); setNote(trip.note ?? ''); }}>
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveBtn, !name.trim() && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={!name.trim()}
+          >
+            <Text style={styles.saveBtnText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity style={styles.metaReadCard} onPress={() => setEditing(true)} activeOpacity={0.75}>
+      <View style={styles.metaReadRow}>
+        <Text style={styles.metaName} numberOfLines={2}>{trip.name}</Text>
+        <View style={styles.metaEditIcon}>
+          <IconEdit size={13} color="#9CA3AF" />
+        </View>
+      </View>
+      {trip.note ? (
+        <Text style={styles.metaNote} numberOfLines={2}>{trip.note}</Text>
+      ) : (
+        <Text style={styles.metaNotePlaceholder}>Tap to add a note…</Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 // ─── Budget card ──────────────────────────────────────────────────────────────
 function BudgetCard({
   trip, items,
@@ -215,21 +343,19 @@ function BudgetCard({
   onStartEdit, onSave, onCancel, onChange,
   onClearAll,
 }: any) {
-  // Only count items that have a price set
   const pricedItems = items.filter((i: TripItem) => hasPriceSet(i));
   const totalSpent  = pricedItems.reduce(
     (s: number, i: TripItem) => s + i.unit_price * (i.quantity ?? 1), 0,
   );
-  const totalUnits    = items.reduce((s: number, i: TripItem) => s + (i.quantity ?? 1), 0);
-  const checkedCount  = items.filter((i: TripItem) => i.is_checked === 1).length;
-  const budget        = trip?.budget ?? 2000;
-  const pct           = Math.min((totalSpent / budget) * 100, 100);
-  const isOver        = totalSpent > budget;
+  const totalUnits   = items.reduce((s: number, i: TripItem) => s + (i.quantity ?? 1), 0);
+  const checkedCount = items.filter((i: TripItem) => i.is_checked === 1).length;
+  const budget       = trip?.budget ?? 2000;
+  const pct          = Math.min((totalSpent / budget) * 100, 100);
+  const isOver       = totalSpent > budget;
   const hasBudgetData = pricedItems.length > 0;
 
   return (
     <View style={styles.budgetCard}>
-      {/* Top row */}
       <View style={styles.budgetTopRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.budgetLabel}>BUDGET TRACKER</Text>
@@ -244,7 +370,6 @@ function BudgetCard({
         )}
       </View>
 
-      {/* Only show totals if at least one item is priced */}
       {hasBudgetData ? (
         <>
           <View style={styles.budgetAmountRow}>
@@ -274,7 +399,9 @@ function BudgetCard({
             ) : (
               <TouchableOpacity onPress={onStartEdit} style={styles.budgetLimitRow}>
                 <Text style={styles.budgetLimit}> / {formatPrice(budget)}</Text>
-                <Text style={styles.budgetEditHint}> ✎</Text>
+                <View style={{ marginLeft: 4 }}>
+                  <IconEdit size={12} color="#9CA3AF" />
+                </View>
               </TouchableOpacity>
             )}
           </View>
@@ -288,7 +415,7 @@ function BudgetCard({
 
           <Text style={[styles.remainingText, isOver && { color: '#DC2626' }]}>
             {isOver
-              ? `⚠  Over budget by ${formatPrice(Math.abs(budget - totalSpent))}`
+              ? `Over budget by ${formatPrice(Math.abs(budget - totalSpent))}`
               : `${formatPrice(budget - totalSpent)} remaining`}
           </Text>
         </>
@@ -299,32 +426,31 @@ function BudgetCard({
       )}
 
       {items.length > 0 && (
-        <Text style={styles.swipeHint}>← swipe to edit  ·  swipe to delete →</Text>
+        <Text style={styles.swipeHint}>swipe right to edit  ·  swipe left to delete</Text>
       )}
     </View>
   );
 }
 
 // ─── Add item bar ─────────────────────────────────────────────────────────────
-// Always visible at the bottom. Price is optional — just type a name and tap Add.
-function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty: number) => void }) {
+function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty: number, note: string) => void }) {
   const [product,   setProduct]   = useState('');
   const [price,     setPrice]     = useState('');
   const [qty,       setQty]       = useState(1);
+  const [note,      setNote]      = useState('');
   const [showExtra, setShowExtra] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   const handleAdd = () => {
     const name = product.trim();
     if (!name) return;
-    onAdd(name, parseFloat(price) || 0, qty);
-    setProduct(''); setPrice(''); setQty(1); setShowExtra(false);
+    onAdd(name, parseFloat(price) || 0, qty, note.trim());
+    setProduct(''); setPrice(''); setQty(1); setNote(''); setShowExtra(false);
     inputRef.current?.focus();
   };
 
   return (
     <View style={styles.addBar}>
-      {/* Optional price + qty row */}
       {showExtra && (
         <View style={styles.addBarExtra}>
           <View style={styles.addBarPriceWrap}>
@@ -351,7 +477,17 @@ function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty
         </View>
       )}
 
-      {/* Main input row */}
+      {showExtra && (
+        <TextInput
+          style={styles.addBarNoteInput}
+          value={note}
+          onChangeText={setNote}
+          placeholder="Note (optional) — e.g. buy the big one"
+          placeholderTextColor="#C4C4C4"
+          returnKeyType="done"
+        />
+      )}
+
       <View style={styles.addBarRow}>
         <TextInput
           ref={inputRef}
@@ -364,14 +500,9 @@ function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty
           onSubmitEditing={handleAdd}
           blurOnSubmit={false}
         />
-        {/* Toggle extra fields */}
-        <TouchableOpacity
-          style={styles.addBarToggle}
-          onPress={() => setShowExtra(s => !s)}
-        >
+        <TouchableOpacity style={styles.addBarToggle} onPress={() => setShowExtra(s => !s)}>
           <Text style={styles.addBarToggleText}>{showExtra ? '▲' : '₱+'}</Text>
         </TouchableOpacity>
-        {/* Add button */}
         <TouchableOpacity
           style={[styles.addBarBtn, !product.trim() && styles.addBarBtnDisabled]}
           onPress={handleAdd}
@@ -384,18 +515,14 @@ function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty
   );
 }
 
-// ─── Add Price modal (inline sheet) ──────────────────────────────────────────
-// Opens when user taps "+ Price" on an unpriced row.
+// ─── Add Price sheet ──────────────────────────────────────────────────────────
 function AddPriceSheet({
   item, onSave, onClose,
 }: { item: TripItem | null; onSave: (id: number, price: number, qty: number) => void; onClose: () => void }) {
   const [price, setPrice] = useState('');
   const [qty,   setQty]   = useState(item?.quantity ?? 1);
 
-  useEffect(() => {
-    setPrice('');
-    setQty(item?.quantity ?? 1);
-  }, [item]);
+  useEffect(() => { setPrice(''); setQty(item?.quantity ?? 1); }, [item]);
 
   if (!item) return null;
 
@@ -459,33 +586,24 @@ function AddPriceSheet({
 export default function TripDetailScreen({ route, navigation }: any) {
   const tripId: number = route?.params?.tripId;
 
-  const [trip,         setTrip]         = useState<Trip | null>(null);
-  const [items,        setItems]         = useState<TripItem[]>([]);
-  const [editingId,    setEditingId]     = useState<number | null>(null);
-  const [addPriceItem, setAddPriceItem]  = useState<TripItem | null>(null);
+  const [trip,         setTrip]        = useState<Trip | null>(null);
+  const [items,        setItems]        = useState<TripItem[]>([]);
+  const [editingId,    setEditingId]    = useState<number | null>(null);
+  const [addPriceItem, setAddPriceItem] = useState<TripItem | null>(null);
 
-  // Budget editing
   const [editingBudget, setEditingBudget] = useState(false);
   const [budgetInput,   setBudgetInput]   = useState('');
 
   const isFocused = useIsFocused();
 
-// ─── load ─────────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    if (!tripId) {
-      console.warn('[TripDetail] No tripId provided');
-      return;
-    }
+    if (!tripId) return;
     try {
-      const t = await getTripById(tripId);
-      if (!t) {
-        console.warn('[TripDetail] Trip not found for id:', tripId);
-        return;
-      }
+      const t    = await getTripById(tripId);
+      if (!t) return;
       const rows = await getTripItems(tripId);
       setTrip(t);
       setItems(rows);
-      console.log('[TripDetail] Loaded trip:', t.name, '| items:', rows.length);
     } catch (e) {
       console.error('[TripDetail] load error:', e);
     }
@@ -494,7 +612,15 @@ export default function TripDetailScreen({ route, navigation }: any) {
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
   useEffect(() => { if (trip?.name) navigation.setOptions({ title: trip.name }); }, [trip]);
 
-  // ── Budget handlers ─────────────────────────────────────
+  // ── Meta (name + note) ──────────────────────────────────
+  const handleSaveMeta = async (name: string, note: string) => {
+    if (!trip) return;
+    await updateTrip(trip.id, { name, note: note || null });
+    navigation.setOptions({ title: name });
+    load();
+  };
+
+  // ── Budget ──────────────────────────────────────────────
   const startBudgetEdit = () => { setBudgetInput((trip?.budget ?? 2000).toString()); setEditingBudget(true); };
   const saveBudget = async () => {
     const n = parseFloat(budgetInput);
@@ -502,26 +628,15 @@ export default function TripDetailScreen({ route, navigation }: any) {
     setEditingBudget(false);
   };
 
-  // ── Item handlers ───────────────────────────────────────
-  const handleAdd = async (product: string, unitPrice: number, qty: number) => {
-    if (!tripId) {
-      console.warn('[TripDetail] handleAdd called without tripId');
-      return;
-    }
-    const trimmed = product.trim();
-    if (!trimmed) return;
-    
-    const insertId = await addItem(tripId, trimmed, unitPrice, qty);
-    console.log('[TripDetail] addItem result:', insertId, 'for tripId:', tripId);
-    
-    if (insertId) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      load();
-    }
+  // ── Items ───────────────────────────────────────────────
+  const handleAdd = async (product: string, unitPrice: number, qty: number, note: string) => {
+    if (!tripId) return;
+    const insertId = await addItem(tripId, product.trim(), unitPrice, qty, note || undefined);
+    if (insertId) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); load(); }
   };
 
-  const handleSaveEdit = async (id: number, product: string, unitPrice: number, qty: number) => {
-    await updateItem(id, product, unitPrice, qty);
+  const handleSaveEdit = async (id: number, product: string, unitPrice: number, qty: number, note: string) => {
+    await updateItem(id, product, unitPrice, qty, note || undefined);
     setEditingId(null);
     load();
   };
@@ -529,7 +644,7 @@ export default function TripDetailScreen({ route, navigation }: any) {
   const handleSavePrice = async (id: number, unitPrice: number, qty: number) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-    await updateItem(id, item.product, unitPrice, qty);
+    await updateItem(id, item.product, unitPrice, qty, item.note ?? undefined);
     setAddPriceItem(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     load();
@@ -562,7 +677,6 @@ export default function TripDetailScreen({ route, navigation }: any) {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={90}
         >
-          {/* ── Add Price sheet — sits above keyboard when active ── */}
           {addPriceItem && (
             <AddPriceSheet
               item={addPriceItem}
@@ -571,15 +685,21 @@ export default function TripDetailScreen({ route, navigation }: any) {
             />
           )}
 
-          {/* ── Main list ── */}
           {items.length === 0 && !addPriceItem ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🛒</Text>
-              <Text style={styles.emptyTitle}>List is empty</Text>
-              <Text style={styles.emptyBody}>
-                Type an item in the bar below.{'\n'}
-                Price is optional — add it later if you don't know it yet.
-              </Text>
+            <View style={{ flex: 1 }}>
+              {trip && (
+                <View style={styles.listContent}>
+                  <TripHeader trip={trip} onSaveMeta={handleSaveMeta} />
+                </View>
+              )}
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>🛒</Text>
+                <Text style={styles.emptyTitle}>List is empty</Text>
+                <Text style={styles.emptyBody}>
+                  Type an item in the bar below.{'\n'}
+                  Price is optional — add it later if you don't know it yet.
+                </Text>
+              </View>
             </View>
           ) : (
             <FlatList
@@ -589,17 +709,20 @@ export default function TripDetailScreen({ route, navigation }: any) {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               ListHeaderComponent={
-                <BudgetCard
-                  trip={trip}
-                  items={items}
-                  editingBudget={editingBudget}
-                  budgetInput={budgetInput}
-                  onStartEdit={startBudgetEdit}
-                  onSave={saveBudget}
-                  onCancel={() => setEditingBudget(false)}
-                  onChange={setBudgetInput}
-                  onClearAll={handleClearAll}
-                />
+                <>
+                  {trip && <TripHeader trip={trip} onSaveMeta={handleSaveMeta} />}
+                  <BudgetCard
+                    trip={trip}
+                    items={items}
+                    editingBudget={editingBudget}
+                    budgetInput={budgetInput}
+                    onStartEdit={startBudgetEdit}
+                    onSave={saveBudget}
+                    onCancel={() => setEditingBudget(false)}
+                    onChange={setBudgetInput}
+                    onClearAll={handleClearAll}
+                  />
+                </>
               }
               renderItem={({ item }) => (
                 <ItemRow
@@ -616,7 +739,6 @@ export default function TripDetailScreen({ route, navigation }: any) {
             />
           )}
 
-          {/* ── Always-visible add bar ── */}
           {!addPriceItem && (
             <AddItemBar onAdd={handleAdd} />
           )}
@@ -631,6 +753,25 @@ const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#F8F7F4' },
   listContent: { padding: 14, paddingBottom: 8 },
 
+  // ── Trip meta header ────────────────────────────────────
+  metaReadCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  metaReadRow:        { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 },
+  metaName:           { fontSize: 20, fontWeight: '800', color: '#111827', flex: 1, marginRight: 8, lineHeight: 26 },
+  metaEditIcon:       { marginTop: 4 },
+  metaNote:           { fontSize: 13, color: '#6B7280', lineHeight: 18, fontStyle: 'italic' },
+  metaNotePlaceholder:{ fontSize: 13, color: '#D1D5DB', fontStyle: 'italic' },
+
+  metaEditCard:   { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1.5, borderColor: '#4F46E5' },
+  metaNameInput:  { backgroundColor: '#F8F7F4', borderRadius: 12, padding: 12, fontSize: 16, fontWeight: '700', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 10 },
+  metaNoteInput:  { fontWeight: '400', minHeight: 56, textAlignVertical: 'top', fontStyle: 'italic' },
+
   // ── Budget card ─────────────────────────────────────────
   budgetCard:     { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   budgetTopRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
@@ -643,7 +784,6 @@ const styles = StyleSheet.create({
   overBudget:     { color: '#DC2626' },
   budgetLimitRow: { flexDirection: 'row', alignItems: 'center' },
   budgetLimit:    { fontSize: 16, fontWeight: '600', color: '#9CA3AF' },
-  budgetEditHint: { fontSize: 13, color: '#C4C4C4' },
   budgetEditInline:    { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetEditPrefix:    { fontSize: 16, fontWeight: '600', color: '#9CA3AF' },
   budgetEditInput:     { fontSize: 16, fontWeight: '700', color: '#4F46E5', minWidth: 70, borderBottomWidth: 2, borderBottomColor: '#4F46E5', paddingVertical: 2, paddingHorizontal: 4 },
@@ -667,10 +807,10 @@ const styles = StyleSheet.create({
   cardChecked:          { borderLeftColor: '#D1D5DB', backgroundColor: '#FAFAFA' },
   checkbox:             { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked:      { backgroundColor: '#059669', borderColor: '#059669' },
-  checkmark:            { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   cardMiddle:           { flex: 1 },
   productName:          { fontSize: 15, fontWeight: '700', color: '#111827', lineHeight: 20 },
   productNameChecked:   { textDecorationLine: 'line-through', color: '#9CA3AF' },
+  itemNote:             { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontStyle: 'italic' },
   unitPriceHint:        { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   cardRight:            { alignItems: 'flex-end', minWidth: 72 },
   lineTotalText:        { fontSize: 16, fontWeight: '800', color: '#059669' },
@@ -678,20 +818,20 @@ const styles = StyleSheet.create({
   qtyBadge:             { marginTop: 3, backgroundColor: '#EEF2FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   qtyBadgeText:         { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
 
-  // + Price button
   addPriceBtn:     { backgroundColor: '#ECFDF5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1, borderColor: '#A7F3D0' },
   addPriceBtnText: { fontSize: 12, fontWeight: '700', color: '#059669' },
 
-  // ── Swipe actions ───────────────────────────────────────
+  // ── Swipe ───────────────────────────────────────────────
   swipeDelete: { backgroundColor: '#DC2626', justifyContent: 'center', alignItems: 'center', width: 80, borderRadius: 14, marginBottom: 8 },
   swipeEdit:   { backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center', width: 80, borderRadius: 14, marginBottom: 8 },
-  swipeLabel:  { fontSize: 12, fontWeight: '700', color: '#FFFFFF', marginTop: 2 },
+  swipeLabel:  { fontSize: 11, fontWeight: '700', color: '#FFFFFF', marginTop: 3 },
 
   // ── Edit card ───────────────────────────────────────────
   editCard:        { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 8, borderWidth: 1.5, borderColor: '#4F46E5' },
   editCardLabel:   { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8, marginBottom: 6 },
   editInput:       { backgroundColor: '#F8F7F4', borderRadius: 12, padding: 12, fontSize: 15, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12 },
   editInputPrice:  { color: '#059669', fontSize: 18, fontWeight: '800' },
+  editInputNote:   { fontWeight: '400', fontStyle: 'italic', minHeight: 52, textAlignVertical: 'top' },
   editRow:         { flexDirection: 'row', gap: 10 },
   editHalf:        { flex: 1 },
   editPreviewRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#A7F3D0' },
@@ -710,34 +850,35 @@ const styles = StyleSheet.create({
   saveBtnDisabled:  { backgroundColor: '#D1D5DB' },
   saveBtnText:      { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
-  // ── Add item bar ────────────────────────────────────────
-  addBar:        { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 12 },
-  addBarExtra:   { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  addBarPriceWrap:{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F7F4', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 10 },
+  // ── Add bar ─────────────────────────────────────────────
+  addBar:          { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 12 },
+  addBarExtra:     { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  addBarPriceWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F7F4', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 10 },
   addBarPesoPrefix:{ fontSize: 15, fontWeight: '700', color: '#059669' },
   addBarPriceInput:{ flex: 1, fontSize: 15, fontWeight: '600', color: '#059669', paddingVertical: 10 },
-  addBarStepper:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F7F4', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 8, paddingVertical: 6, gap: 8 },
-  addBarRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addBarInput:   { flex: 1, backgroundColor: '#F8F7F4', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB' },
-  addBarToggle:  { padding: 10, borderRadius: 10, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
-  addBarToggleText: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
-  addBarBtn:     { backgroundColor: '#4F46E5', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14 },
+  addBarStepper:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F7F4', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 8, paddingVertical: 6, gap: 8 },
+  addBarNoteInput: { backgroundColor: '#F8F7F4', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, fontStyle: 'italic', color: '#374151', borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 8 },
+  addBarRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addBarInput:     { flex: 1, backgroundColor: '#F8F7F4', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB' },
+  addBarToggle:    { padding: 10, borderRadius: 10, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
+  addBarToggleText:{ fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  addBarBtn:       { backgroundColor: '#4F46E5', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14 },
   addBarBtnDisabled: { backgroundColor: '#D1D5DB' },
-  addBarBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  addBarBtnText:   { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 
   // ── Add price sheet ─────────────────────────────────────
-  priceSheet:        { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 16, paddingBottom: 8 },
-  priceSheetHandle:  { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
-  priceSheetTitle:   { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 2 },
-  priceSheetSub:     { fontSize: 12, color: '#9CA3AF', marginBottom: 14 },
-  priceSheetRow:     { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  priceSheet:          { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 16, paddingBottom: 8 },
+  priceSheetHandle:    { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  priceSheetTitle:     { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 2 },
+  priceSheetSub:       { fontSize: 12, color: '#9CA3AF', marginBottom: 14 },
+  priceSheetRow:       { flexDirection: 'row', gap: 10, marginBottom: 8 },
   priceSheetPriceWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F7F4', borderRadius: 14, borderWidth: 1.5, borderColor: '#4F46E5', paddingHorizontal: 12 },
-  priceSheetPrefix:  { fontSize: 22, fontWeight: '800', color: '#059669', marginRight: 4 },
-  priceSheetInput:   { flex: 1, fontSize: 26, fontWeight: '800', color: '#059669', paddingVertical: 10 },
-  priceSheetTotal:   { fontSize: 13, fontWeight: '600', color: '#059669', textAlign: 'right', marginBottom: 10 },
-  priceSheetActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  priceSheetPrefix:    { fontSize: 22, fontWeight: '800', color: '#059669', marginRight: 4 },
+  priceSheetInput:     { flex: 1, fontSize: 26, fontWeight: '800', color: '#059669', paddingVertical: 10 },
+  priceSheetTotal:     { fontSize: 13, fontWeight: '600', color: '#059669', textAlign: 'right', marginBottom: 10 },
+  priceSheetActions:   { flexDirection: 'row', gap: 8, marginTop: 4 },
 
-  // ── Empty state ─────────────────────────────────────────
+  // ── Empty ───────────────────────────────────────────────
   empty:     { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   emptyIcon: { fontSize: 52, marginBottom: 16 },
   emptyTitle:{ fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8 },
