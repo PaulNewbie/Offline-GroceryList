@@ -15,7 +15,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "$(PRODUCT_NAME) needs access to your camera to scan grocery items."
+        "NSCameraUsageDescription": "$(PRODUCT_NAME) needs access to your camera to scan grocery items.",
+        "NSMicrophoneUsageDescription": "$(PRODUCT_NAME) needs access to your microphone for speech recognition."
       },
       "bundleIdentifier": "com.anonymous.OfflineScanner"
     },

@@ -9,6 +9,7 @@
 //   "Sardines dalawa 25"                 → product: Sardines, price: 25, qty: 2
 //   "Colgate toothpaste tatlo 75 pesos"  → product: Colgate toothpaste, price: 75, qty: 3
 
+import { PermissionsAndroid, Platform, Alert } from 'react-native';
 import { useState, useCallback, useRef } from 'react';
 import {
   ExpoSpeechRecognitionModule,
@@ -43,11 +44,6 @@ export function parseVoiceInput(transcript: string): VoiceResult {
   let qty    = 1;
 
   // ── 1. Extract QUANTITY ────────────────────────────────────────────────────
-  // Patterns (in order of specificity):
-  //   "quantity 3" | "qty 3" | "times 3" | "x3" | "× 3"
-  //   Filipino: "dalawa" | "tatlo" etc.
-
-  // "quantity/qty/times N" or "N quantity/qty/pieces/pcs/packs"
   const qtyPattern =
     /(?:quantity|qty|times|x|×)\s*(\d+)|(\d+)\s*(?:pieces?|pcs?|packs?|units?|quantity|qty)/i;
   const qtyMatch = remaining.match(qtyPattern);
@@ -55,9 +51,7 @@ export function parseVoiceInput(transcript: string): VoiceResult {
     qty = parseInt(qtyMatch[1] ?? qtyMatch[2], 10) || 1;
     remaining = remaining.replace(qtyMatch[0], ' ');
   } else {
-    // Filipino number words anywhere in the string
     for (const [word, num] of Object.entries(FILIPINO_NUMBERS)) {
-      // Only match whole words
       const re = new RegExp(`\\b${word}\\b`, 'i');
       if (re.test(remaining)) {
         qty = num;
@@ -68,20 +62,11 @@ export function parseVoiceInput(transcript: string): VoiceResult {
   }
 
   // ── 2. Extract PRICE ──────────────────────────────────────────────────────
-  // Patterns (most specific first):
-  //   "52.50 pesos" | "52 pesos" | "pesos 52" | "price 52" | "presyo 52"
-  //   bare decimal "52.50" (no label)
-
   const pricePatterns: RegExp[] = [
-    // Number + peso keyword
     /(\d{1,5}(?:\.\d{1,2})?)\s*(?:pesos?|peso|php|presyo)\b/i,
-    // Peso keyword + number
     /(?:pesos?|peso|php|presyo|price|halaga)\s+(\d{1,5}(?:\.\d{1,2})?)\b/i,
-    // "price is 52" / "presyo ay 52"
     /(?:price|presyo)\s+(?:is|ay|ng)?\s*(\d{1,5}(?:\.\d{1,2})?)\b/i,
-    // Bare decimal (last resort — must have cents to avoid grabbing weights like "200")
     /\b(\d{1,5}\.\d{1,2})\b/,
-    // Plain integer ≤ 4 digits that hasn't been matched yet (very last resort)
     /\b(\d{1,4})\b/,
   ];
 
@@ -89,7 +74,6 @@ export function parseVoiceInput(transcript: string): VoiceResult {
     const m = remaining.match(pattern);
     if (m) {
       const candidate = parseFloat(m[1]);
-      // Sanity check: price should be > 0 and < 100,000
       if (candidate > 0 && candidate < 100000) {
         price     = candidate;
         remaining = remaining.replace(m[0], ' ');
@@ -99,7 +83,6 @@ export function parseVoiceInput(transcript: string): VoiceResult {
   }
 
   // ── 3. Extract PRODUCT ────────────────────────────────────────────────────
-  // Strip leftover noise keywords and clean up
   const noiseWords = [
     'pesos', 'peso', 'php', 'presyo', 'price', 'halaga',
     'quantity', 'qty', 'times', 'pieces', 'pcs', 'packs', 'units',
@@ -110,14 +93,13 @@ export function parseVoiceInput(transcript: string): VoiceResult {
     product = product.replace(new RegExp(`\\b${noise}\\b`, 'gi'), ' ');
   }
 
-  // Clean up extra whitespace and capitalise words
   product = product
     .replace(/\s{2,}/g, ' ')
     .trim()
     .replace(/\b\w/g, c => c.toUpperCase());
 
   return {
-    product: product || transcript, // fallback to raw if parsing strips everything
+    product: product || transcript, 
     price:   price > 0 ? price.toFixed(2) : '',
     qty,
   };
@@ -140,8 +122,8 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions) {
   useSpeechRecognitionEvent('result', event => {
     const text = event.results?.[0]?.transcript ?? '';
     setTranscript(text);
-    // If this is a final result, process immediately
     if (!event.isFinal) return;
+    
     setState('processing');
     const parsed = parseVoiceInput(text);
     onResult(parsed);
@@ -160,29 +142,61 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions) {
 
   useSpeechRecognitionEvent('end', () => {
     if (isListening.current) {
-      // Recognition ended without a final result — treat as done
       setState('idle');
       isListening.current = false;
     }
   });
 
+  // ── Native OS Permission Helper ────────────────────────────────────────────
+  const requestNativeMicrophonePermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message: 'OfflineScanner needs access to your microphone to parse grocery items via voice.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          },
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn(err);
+        return false;
+      }
+    }
+    return true; 
+  };
+
   // ── Start ──────────────────────────────────────────────────────────────────
   const startListening = useCallback(async () => {
     try {
-      const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (status !== 'granted') {
+      // 1. Force the native Android OS prompt first
+      const hasNativePermission = await requestNativeMicrophonePermission();
+      if (!hasNativePermission) {
+        Alert.alert('Permission Denied', 'Microphone access is required for voice logging.');
         onError?.('Microphone permission denied.');
         return;
       }
+
+      // 2. Call Expo's internal permission check (safeguard)
+      const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (status !== 'granted') {
+        onError?.('Microphone permission denied by Expo.');
+        return;
+      }
+
       setTranscript('');
       setState('listening');
       isListening.current = true;
 
       ExpoSpeechRecognitionModule.start({
-        lang:          'en-PH',   // Philippine English — handles Taglish well
-        interimResults: true,     // show live transcript as user speaks
+        lang:           'en-PH',  
+        interimResults: true,     
         maxAlternatives: 1,
-        continuous:     false,    // stop after first pause
+        continuous:     false,    
       });
     } catch (e) {
       console.error('[Voice] start error:', e);
