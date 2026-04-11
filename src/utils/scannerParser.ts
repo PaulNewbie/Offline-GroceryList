@@ -247,7 +247,7 @@ const BRAND_WORD_DICTIONARY: string[] = [
   'TANG', 'EIGHT', 'OCLOCK', 'SAGADA',
   // ── Instant noodles / Snacks ───────────────────────────────────────────────
   'LUCKY', 'PAYLESS', 'NISSIN', 'INDO', 'MIE', 'PANCIT', 'CANTON',
-  'OISHI', 'NOVA', 'PRAWN', 'CRACKERS', 'MARTY', 'CHICHARRON',
+  'OISHI', 'NOVA', 'PRAWN', 'CRACKERS', 'MARTY',
   'JACK', 'JILL', 'PIATTOS', 'TORTILLOS', 'CLOVER', 'CHIPS',
   'REBISCO', 'MONDE', 'MAMON', 'CREAM', 'PUFF', 'SODA',
   'SKYFLAKES', 'FIBISCO', 'HANSEL',
@@ -388,7 +388,7 @@ function scoreLine(line: string, _block: any): number {
 
   // Philippine grocery brand signal
   if (
-    /NESTLE|NESCAFE|MILO|MAGGI|UFC|DATU\s*PUTI|ARGENTINA|SAN\s*MIGUEL|DEL\s*MONTE|LUCKY\s*ME|PAYLESS|OISHI|JACK\s*N\s*JILL|SUNKIST|MONDE|REBISCO|SELECTA|MAGNOLIA|ALASKA|HIGHLAND|CENTURY|MEGA|LIGO|SARDINES|SPAM|CDO|PAMANA|CHAMPION|ARIEL|TIDE|SURF|DOWNY|COLGATE|SAFEGUARD|DOVE|PALMOLIVE|PANTENE|SUNSILK|REJOICE|KOPIKO|GREAT\s*TASTE|NISSIN|SKYFLAKES|FIBISCO|HANSEL|PIATTOS|NOVA|CHICHARRON|KNORR|AJINOMOTO|BARRIO\s*FIESTA|MAMA\s*SITA|MINOLA|MAZOLA|BAGUIO/i
+    /NESTLE|NESCAFE|MILO|MAGGI|UFC|DATU\s*PUTI|ARGENTINA|SAN\s*MIGUEL|DEL\s*MONTE|LUCKY\s*ME|PAYLESS|OISHI|JACK\s*N\s*JILL|SUNKIST|MONDE|REBISCO|SELECTA|MAGNOLIA|ALASKA|HIGHLAND|CENTURY|MEGA|LIGO|SARDINES|SPAM|CDO|PAMANA|CHAMPION|ARIEL|TIDE|SURF|DOWNY|COLGATE|SAFEGUARD|DOVE|PALMOLIVE|PANTENE|SUNSILK|REJOICE|KOPIKO|GREAT\s*TASTE|NISSIN|SKYFLAKES|FIBISCO|HANSEL|PIATTOS|NOVA|KNORR|AJINOMOTO|BARRIO\s*FIESTA|MAMA\s*SITA|MINOLA|MAZOLA|BAGUIO/i
     .test(trimmed)
   )                                                                score += 40;
 
@@ -407,81 +407,13 @@ function scoreLine(line: string, _block: any): number {
   return score;
 }
 
-
 // ─── 7. PRICE EXTRACTOR ───────────────────────────────────────────────────────
-//
-// PH grocery tags frequently split the price across 2–3 separate OCR blocks:
-//
-//   [₱ or B or P]   [35]   [.15]
-//        ↑              ↑        ↑
-//   currency symbol  base    decimal fragment
-//   (often misread)  price   (printed with a gap)
-//
-// Strategy: work from the RAW ML Kit blocks (not flattened lines) so we have
-// accurate frame coordinates. We classify each block by role, then assemble.
 
-function formatPriceStr(rawStr: string): string {
-  let cleaned = rawStr.replace(/[^0-9.]/g, '');
-  if (cleaned.length >= 3 && !cleaned.includes('.')) {
-    cleaned = cleaned.slice(0, -2) + '.' + cleaned.slice(-2);
-  }
-  return `₱${cleaned}`;
+function formatPriceStr(base: string, cents?: string): string {
+  const cleanBase = base.replace(/[^0-9]/g, '');
+  const cleanCents = cents ? cents.replace(/[^0-9]/g, '') : '00';
+  return `₱${cleanBase}.${cleanCents}`;
 }
-
-// ── Block role classifiers ─────────────────────────────────────────────────────
-
-/** Currency symbol block — ₱, P, B (common misread of ₱), PHP */
-function isCurrencySymbol(s: string): boolean {
-  return /^[₱PBb]$|^PHP$|^Php$|^php$/.test(s.trim());
-}
-
-/** Base price block — 1–5 digits, optionally prefixed with currency symbol.
- *  NOT a barcode (≤5 digits), NOT a year (not 19xx/20xx), NOT a time. */
-function isBasePriceBlock(s: string): boolean {
-  const t = s.trim();
-  // Reject obvious non-prices first
-  if (/^\d{6,}$/.test(t)) return false;                    // barcode
-  if (/^(19|20)\d{2}$/.test(t)) return false;              // year
-  if (/\d{1,2}:\d{2}/.test(t)) return false;               // time
-  // Accept: optional symbol then 1–5 digits (whole number only)
-  return /^[₱PBb]?\s*\d{1,5}$/.test(t);
-}
-
-/** Decimal fragment block — exactly ".15" / ",15" / "15" (2 digits), nothing else.
- *  Very strict to avoid false matches with barcodes, times, quantities. */
-function isDecimalFragment(s: string): boolean {
-  return /^[.,]?\d{2}$/.test(s.trim());
-}
-
-// ── Spatial helpers ────────────────────────────────────────────────────────────
-
-function blockCentreY(b: any): number {
-  return (b?.frame?.top ?? 0) + (b?.frame?.height ?? 0) / 2;
-}
-function blockLeft(b: any): number  { return b?.frame?.left ?? 0; }
-function blockRight(b: any): number {
-  return (b?.frame?.left ?? 0) + (b?.frame?.width ?? 0);
-}
-function blockHeight(b: any): number { return b?.frame?.height ?? 40; }
-
-/** True when B is on roughly the same horizontal row as A */
-function sameRow(bA: any, bB: any): boolean {
-  const rowTolerance = Math.max(blockHeight(bA), blockHeight(bB)) * 0.7;
-  return Math.abs(blockCentreY(bA) - blockCentreY(bB)) < rowTolerance;
-}
-
-/** True when B is to the right of A (with small overlap tolerance) */
-function isRightOf(bA: any, bB: any): boolean {
-  // bB starts after bA ends, but allow 15px overlap for tight layouts
-  return blockLeft(bB) > blockRight(bA) - 15;
-}
-
-/** True when B is not absurdly far from A (within 4× bA's height horizontally) */
-function isNearRight(bA: any, bB: any): boolean {
-  return blockLeft(bB) < blockRight(bA) + blockHeight(bA) * 4;
-}
-
-// ── Main extractor ─────────────────────────────────────────────────────────────
 
 interface PriceResult {
   price:          string;
@@ -489,146 +421,69 @@ interface PriceResult {
   priceLineIndex: number;
 }
 
-/**
- * Works directly on the RAW ML Kit blocks (passed as `rawBlocks`) in addition
- * to the sanitized flat lines. This gives us reliable frame coordinates for
- * spatial stitching — the flat-line blocks share frames with their parent block
- * but lose precise per-line position.
- *
- * @param flatBlocks  — blocks array parallel to sanitizedLines (flat, 1 per line)
- * @param sanitizedLines — sanitized text per flat line
- * @param rawBlocks   — original ML Kit blocks before flattening (for spatial work)
- */
 function extractPrice(
-  flatBlocks:     any[],
-  sanitizedLines: string[],
-  rawBlocks?:     any[],
+  blocks:         any[],
+  sanitizedLines: string[]
 ): PriceResult {
+  const validPrices: PriceResult[] = [];
 
-  // ── Debug dump (DEV only) ──────────────────────────────────────────────────
-  if (__DEV__) {
-    console.log('[Price] ── OCR flat lines ──');
-    sanitizedLines.forEach((l, i) => {
-      const f = flatBlocks[i]?.frame;
-      console.log(`  [${i}] "${l}" | frame: x=${f?.left} y=${f?.top} w=${f?.width} h=${f?.height}`);
-    });
-    if (rawBlocks) {
-      console.log('[Price] ── Raw blocks ──');
-      rawBlocks.forEach((b, i) => {
-        const f = b?.frame;
-        console.log(`  [${i}] "${b.text?.replace(/\n/g,' ')}" | frame: x=${f?.left} y=${f?.top} w=${f?.width} h=${f?.height}`);
-      });
-    }
-  }
-
-  // ── Pass 1: scan flat lines for complete prices (no stitching needed) ──────
   for (let i = 0; i < sanitizedLines.length; i++) {
-    const line = sanitizedLines[i];
+    const block = blocks[i];
+    
+    // Lookahead window: stitch the current line and the next two lines 
+    // to catch split blocks (fixes the "huge gap" decimal issue)
+    const line1 = sanitizedLines[i];
+    const line2 = sanitizedLines[i + 1] || '';
+    const line3 = sanitizedLines[i + 2] || '';
+    const windowText = `${line1} ${line2} ${line3}`.trim();
 
-    // Pattern A — currency symbol immediately followed by digits with decimal
-    // e.g. "₱35.15"  "P 35.15"
-    const matchA = line.match(/[₱PBb]\s*(\d{1,5}[.,]\d{2})\b/);
+    let extracted: string | null = null;
+
+    // Pattern A: Symbol + Base + Decimal (e.g., "₱ 7 .15", "P7.15", "P 2750")
+    // Note: The [.,]? means it will gracefully handle a missing dot!
+    const matchA = windowText.match(/(?:^|\s)(?:₱|P|PHP|Php|B|b)\s*(\d{1,5})\s*[.,]?\s*(\d{2})\b/i);
     if (matchA) {
-      const price = `₱${matchA[1].replace(',', '.')}`;
-      if (__DEV__) console.log(`[Price] PatA hit: "${line}" → ${price}`);
-      return { price, priceBlock: flatBlocks[i], priceLineIndex: i };
+      extracted = formatPriceStr(matchA[1], matchA[2]);
+    } else {
+      // Pattern B: Naked decimal price without a symbol (e.g., "35 . 15", "1,250.00")
+      const matchB = windowText.match(/\b(\d{1,3}(?:,\d{3})*)\s*[.,]\s*(\d{2})\b/);
+      if (matchB) {
+        extracted = formatPriceStr(matchB[1], matchB[2]);
+      } else {
+        // Pattern C: Whole number with symbol, NO decimal (e.g., "₱ 35")
+        const matchC = windowText.match(/(?:^|\s)(?:₱|P|PHP|Php|B|b)\s*(\d{1,5})\b/i);
+        if (matchC) {
+          extracted = formatPriceStr(matchC[1], '00');
+        }
+      }
     }
 
-    // Pattern B — naked decimal price already complete
-    // e.g. "35.15"  "1,250.00"
-    const matchB = line.match(/\b(\d{1,3}(?:,\d{3})*\.\d{2})\b/);
-    if (matchB) {
-      const price = formatPriceStr(matchB[1]);
-      if (__DEV__) console.log(`[Price] PatB hit: "${line}" → ${price}`);
-      return { price, priceBlock: flatBlocks[i], priceLineIndex: i };
-    }
-  }
-
-  // ── Pass 2: spatial stitching for split prices ─────────────────────────────
-  // Collect candidate blocks by role from the FLAT lines (frames are good enough
-  // because each flat line keeps its parent block's frame).
-  interface RoleBlock { text: string; block: any; idx: number; }
-  const symbolBlocks:  RoleBlock[] = [];
-  const baseBlocks:    RoleBlock[] = [];
-  const decimalBlocks: RoleBlock[] = [];
-
-  for (let i = 0; i < sanitizedLines.length; i++) {
-    const t = sanitizedLines[i].trim();
-    const b = flatBlocks[i];
-    if (isCurrencySymbol(t))   symbolBlocks.push({ text: t, block: b, idx: i });
-    if (isBasePriceBlock(t))   baseBlocks.push({ text: t, block: b, idx: i });
-    if (isDecimalFragment(t))  decimalBlocks.push({ text: t, block: b, idx: i });
-  }
-
-  if (__DEV__) {
-    console.log('[Price] Symbols:', symbolBlocks.map(r => `"${r.text}"`));
-    console.log('[Price] Bases:',   baseBlocks.map(r => `"${r.text}" x=${blockLeft(r.block)}`));
-    console.log('[Price] Decimals:',decimalBlocks.map(r => `"${r.text}" x=${blockLeft(r.block)}`));
-  }
-
-  // Strategy: for each base-price block, look for a decimal fragment to its right
-  // on the same row. Accept the spatially closest one.
-  for (const base of baseBlocks) {
-    const baseNum = base.text.replace(/[₱PBb\s]/g, '');
-
-    // Find best decimal fragment: same row, to the right, closest
-    let bestDec:  RoleBlock | null = null;
-    let bestDist  = Infinity;
-
-    for (const dec of decimalBlocks) {
-      if (!sameRow(base.block, dec.block)) continue;
-      if (!isRightOf(base.block, dec.block)) continue;
-      if (!isNearRight(base.block, dec.block)) continue;
-      const dist = blockLeft(dec.block) - blockRight(base.block);
-      if (dist < bestDist) { bestDist = dist; bestDec = dec; }
-    }
-
-    if (bestDec) {
-      const cents = bestDec.text.replace(/^[.,]/, '');
-      const price = `₱${baseNum}.${cents}`;
-      if (__DEV__) console.log(`[Price] Stitched: base="${base.text}" + dec="${bestDec.text}" → ${price}`);
-      // Return the base block as anchor (used for spatial scoring of product name)
-      return { price, priceBlock: base.block, priceLineIndex: base.idx };
-    }
-
-    // No decimal fragment found — but if there is a currency symbol to the LEFT
-    // on the same row, this base number is confidently the price (whole peso)
-    for (const sym of symbolBlocks) {
-      if (!sameRow(base.block, sym.block)) continue;
-      // Symbol must be to the LEFT of the base
-      if (blockLeft(sym.block) >= blockLeft(base.block)) continue;
-      const price = `₱${baseNum}.00`;
-      if (__DEV__) console.log(`[Price] Symbol+Base (no decimal): "${sym.text}" + "${base.text}" → ${price}`);
-      return { price, priceBlock: base.block, priceLineIndex: base.idx };
+    if (extracted) {
+      // Save it as a valid candidate
+      if (!validPrices.some(p => p.priceLineIndex === i)) {
+        validPrices.push({ price: extracted, priceBlock: block, priceLineIndex: i });
+      }
     }
   }
 
-  if (__DEV__) console.log('[Price] No price found');
-  return { price: '---', priceBlock: null, priceLineIndex: -1 };
+  if (validPrices.length === 0) {
+    return { price: '---', priceBlock: null, priceLineIndex: -1 };
+  }
+
+  // ── THE FIX ── 
+  // Sort all found prices. The Retail Price has the largest text (highest frame.height).
+  // If heights are a tie, we pick the lowest block on the tag (highest index).
+  validPrices.sort((a, b) => {
+    const heightA = a.priceBlock?.frame?.height || 0;
+    const heightB = b.priceBlock?.frame?.height || 0;
+    if (heightA !== heightB) {
+       return heightB - heightA; // largest height wins
+    }
+    return b.priceLineIndex - a.priceLineIndex;
+  });
+
+  return validPrices[0];
 }
-
-
-// ─── 8. SPATIAL BONUS ─────────────────────────────────────────────────────────
-function spatialBonus(candidateBlock: any, priceBlock: any): number {
-  if (!priceBlock?.frame || !candidateBlock?.frame) return 0;
-
-  const pY = priceBlock.frame.top    ?? 0;
-  const pX = priceBlock.frame.left   ?? 0;
-  const cY = candidateBlock.frame.top  ?? 0;
-  const cX = candidateBlock.frame.left ?? 0;
-
-  let bonus = 0;
-  const deltaY = pY - cY;
-  if (deltaY > 0 && deltaY < pY * 0.6)   bonus += 30;
-  else if (deltaY >= pY * 0.6)            bonus += 10;
-
-  const deltaX = pX - cX;
-  if (deltaX >= 0)        bonus += 20;
-  else if (deltaX > -50)  bonus += 5;
-
-  return bonus;
-}
-
 
 // ─── 9. SOFT EDGE PENALTY ─────────────────────────────────────────────────────
 function edgePenalty(block: any, photoWidth: number, photoHeight: number): number {
@@ -754,10 +609,18 @@ export async function processScannedText(
 
   if (!blocks || blocks.length === 0) return FAILED;
 
-  // Step 1 — Sort blocks top → bottom
-  const sortedBlocks = [...blocks].sort(
-    (a, b) => (a.frame?.top ?? 0) - (b.frame?.top ?? 0),
-  );
+  // Step 1 — Sort all blocks top → bottom, and left → right for blocks on the same row
+  const sortedBlocks = [...blocks].sort((a, b) => {
+    const yDiff = (a.frame?.top ?? 0) - (b.frame?.top ?? 0);
+    // Dynamic row tolerance based on the actual size of the font on the tag
+    const rowTolerance = Math.max(a.frame?.height ?? 0, b.frame?.height ?? 0) * 0.5 || 15;
+    
+    // If blocks are on the same horizontal row, sort them left-to-right
+    if (Math.abs(yDiff) < rowTolerance) {
+      return (a.frame?.left ?? 0) - (b.frame?.left ?? 0);
+    }
+    return yDiff;
+  });
 
   // Step 2 — Sanitize → correct → flatten into individual lines
   interface FlatLine { text: string; block: any }
@@ -781,7 +644,6 @@ export async function processScannedText(
   const { price, priceBlock, priceLineIndex } = extractPrice(
     flatLines.map(l => l.block),
     sanitizedTexts,
-    sortedBlocks,   // ← raw blocks with reliable per-block frames
   );
 
   // Step 4 — Score every non-price line for product candidacy
@@ -793,7 +655,6 @@ export async function processScannedText(
     if (isHardRejected(text)) continue;
 
     let score = scoreLine(text, block);
-    score += spatialBonus(block, priceBlock);
     score += edgePenalty(block, photoWidth, photoHeight);
 
     candidates.push({ text, score, block });
