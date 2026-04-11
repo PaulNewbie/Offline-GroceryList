@@ -197,6 +197,68 @@ const HARD_REJECT_PATTERNS: RegExp[] = [
   /^[0-9\s\-\.\,\*#@%]{4,}$/,
 ];
 
+// ─── 4b. PRICE-CONTEXT REJECT PATTERNS ───────────────────────────────────────
+
+const PRICE_CONTEXT_PATTERNS: RegExp[] = [
+  /\bprice\b/i,
+  /\bprice\s*per\s*(piece|pc|pcs|kilo|kg|gram|g|liter|litre|l|pack|sachet)\b/i,
+  /\bper\s*(piece|pc|pcs|kilo|kg|gram|g|unit|pack)\b/i,
+  /\bretail\s*price\b/i,
+  /\bsrp\b/i,
+  /\bregular\s*price\b/i,
+  /\bspecial\s*price\b/i,
+  /\bmember('?s)?\s*price\b/i,
+  /\bpromo\s*price\b/i,
+  /\bsale\s*price\b/i,
+  /\bunit\s*price\b/i,
+  /\bprice\s*tag\b/i,
+  /\bpresyo\b/i,
+  /\bhalaga\b/i,
+  /\bper\s*\d+\s*(g|kg|ml|l|oz|lb)\b/i,
+  /\b\d+\s*for\s*[₱P]/i,
+  /\bbuy\s*\d+\s*(get|take)\s*\d+\b/i,
+  /^[₱P]\s*\d+(\.\d{1,2})?$/,
+  /^(php|peso)\s*\d+/i,
+];
+
+// Canonical price-context words to fuzzy-match against.
+// Covers the most common OCR corruptions of "price" and "piece/pieca/piec".
+const PRICE_FUZZY_WORDS: string[] = [
+  'PRICE', 'PRISE', 'PRICC', 'PRICY', 'PRICA', 'PRECE',
+  'PIECE', 'PIECA', 'PIEC', 'PEICE', 'PEECE',
+  'PRESYO', 'HALAGA', 'RETAIL', 'MEMBER',
+];
+
+// How many edits we tolerate per word length
+const fuzzyPriceEditThreshold = (len: number) => {
+  if (len <= 4) return 1;
+  if (len <= 6) return 2;
+  return 3;
+};
+
+// Check if any token in the line fuzzy-matches a price-context word
+const hasFuzzyPriceWord = (line: string): boolean => {
+  const tokens = line.trim().toUpperCase().split(/\s+/);
+  for (const token of tokens) {
+    // Strip non-alpha so "Prica." and "Pricc," still match
+    const clean = token.replace(/[^A-Z]/g, '');
+    if (clean.length < 3) continue;
+    for (const priceWord of PRICE_FUZZY_WORDS) {
+      if (Math.abs(clean.length - priceWord.length) > 3) continue;
+      const dist = levenshtein(clean, priceWord);
+      if (dist <= fuzzyPriceEditThreshold(priceWord.length)) return true;
+    }
+  }
+  return false;
+};
+
+const isPriceContextLine = (line: string): boolean => {
+  if (PRICE_CONTEXT_PATTERNS.some(re => re.test(line.trim()))) return true;
+  if (hasFuzzyPriceWord(line)) return true;
+  return false;
+};
+
+// ─── 4a. Based-CONTEXT REJECT PATTERNS ───────────────────────────────────────
 // Store-name tokens checked against the *space-stripped, uppercased* line.
 // Catches OCR fragments like "PU REgi OLD" → collapsed "PUREGIOLD" → fuzzy match.
 const STORE_NAME_TOKENS: string[] = [
@@ -224,11 +286,13 @@ function resemblesStoreName(collapsed: string): boolean {
   return false;
 }
 
+// ─── 4. BLOCKLIST ─────────────────────────────────────────────────────────────
 function isHardRejected(line: string): boolean {
   const trimmed   = line.trim();
   const collapsed = trimmed.replace(/\s+/g, '').toUpperCase();
   if (HARD_REJECT_PATTERNS.some(re => re.test(trimmed))) return true;
-  if (resemblesStoreName(collapsed)) return true;
+  if (resemblesStoreName(collapsed))                      return true;
+  if (isPriceContextLine(trimmed))                        return true; 
   return false;
 }
 
@@ -246,7 +310,7 @@ const BRAND_WORD_DICTIONARY: string[] = [
   'RED', 'BULL', 'KOPIKO', 'GREAT', 'TASTE',
   'TANG', 'EIGHT', 'OCLOCK', 'SAGADA',
   // ── Instant noodles / Snacks ───────────────────────────────────────────────
-  'LUCKY', 'PAYLESS', 'NISSIN', 'INDO', 'MIE', 'PANCIT', 'CANTON',
+  'LUCKY', 'NISSIN', 'INDO', 'MIE', 'PANCIT', 'CANTON',
   'OISHI', 'NOVA', 'PRAWN', 'CRACKERS', 'MARTY',
   'JACK', 'JILL', 'PIATTOS', 'TORTILLOS', 'CLOVER', 'CHIPS',
   'REBISCO', 'MONDE', 'MAMON', 'CREAM', 'PUFF', 'SODA',
@@ -384,11 +448,22 @@ function scoreLine(line: string, _block: any): number {
   else if (len > 40 && len <= 60)                                  score += 5;
 
   if (/[A-Za-z]{2,}/.test(trimmed))                               score += 10;
-  if (/\d+(\.\d+)?\s*(G|KG|ML|L|OZ|LB)/i.test(trimmed))          score += 10;
 
-  // Philippine grocery brand signal
+  // ── NEW: Quantity suffix is a strong product name signal ─────────────────
+  // "Glasses Set 3pcs", "Biscuit 200g", "Shampoo 250ml" — these are almost
+  // certainly product names, not price labels. Reward them explicitly.
+  if (/\d+\s*(pcs?|pieces?|sets?|pack|sachets?|g|kg|ml|l|oz|lb)\b/i.test(trimmed)) {
+    score += 25;
+  }
+
+  // ── NEW: Title-case multi-word lines with no digits score higher ──────────
+  // "Glasses Set", "Household Use", "Corned Beef" — clean product descriptors
+  if (isTitleCase && tokenCount >= 2 && !/\d/.test(trimmed)) {
+    score += 15;
+  }
+
   if (
-    /NESTLE|NESCAFE|MILO|MAGGI|UFC|DATU\s*PUTI|ARGENTINA|SAN\s*MIGUEL|DEL\s*MONTE|LUCKY\s*ME|PAYLESS|OISHI|JACK\s*N\s*JILL|SUNKIST|MONDE|REBISCO|SELECTA|MAGNOLIA|ALASKA|HIGHLAND|CENTURY|MEGA|LIGO|SARDINES|SPAM|CDO|PAMANA|CHAMPION|ARIEL|TIDE|SURF|DOWNY|COLGATE|SAFEGUARD|DOVE|PALMOLIVE|PANTENE|SUNSILK|REJOICE|KOPIKO|GREAT\s*TASTE|NISSIN|SKYFLAKES|FIBISCO|HANSEL|PIATTOS|NOVA|KNORR|AJINOMOTO|BARRIO\s*FIESTA|MAMA\s*SITA|MINOLA|MAZOLA|BAGUIO/i
+    /NESTLE|NESCAFE|MILO|MAGGI|UFC|DATU\s*PUTI|ARGENTINA|SAN\s*MIGUEL|DEL\s*MONTE|LUCKY\s*ME|OISHI|JACK\s*N\s*JILL|SUNKIST|MONDE|REBISCO|SELECTA|MAGNOLIA|ALASKA|HIGHLAND|CENTURY|MEGA|LIGO|SARDINES|SPAM|CDO|PAMANA|CHAMPION|ARIEL|TIDE|SURF|DOWNY|COLGATE|SAFEGUARD|DOVE|PALMOLIVE|PANTENE|SUNSILK|REJOICE|KOPIKO|GREAT\s*TASTE|NISSIN|SKYFLAKES|FIBISCO|HANSEL|PIATTOS|NOVA|KNORR|AJINOMOTO|BARRIO\s*FIESTA|MAMA\s*SITA|MINOLA|MAZOLA|BAGUIO/i
     .test(trimmed)
   )                                                                score += 40;
 
@@ -403,6 +478,14 @@ function scoreLine(line: string, _block: any): number {
   if (len <= 2)                                                    score -= 50;
 
   if (trimmed === trimmed.toLowerCase() && /[a-z]/.test(trimmed))  score -= 15;
+
+  if (/\bprice\b|\bpresyo\b|\bhalaga\b|\bsrp\b|\bper\s*(pc|piece|kilo|kg)\b/i.test(trimmed)) {
+    score -= 80;
+  }
+
+  if (/^(regular|special|member|promo|sale|retail|unit)[\s:]/i.test(trimmed)) {
+    score -= 60;
+  }
 
   return score;
 }
@@ -520,7 +603,6 @@ const KNOWN_BRAND_PHRASES: string[] = [
   'SAN MIGUEL BEER', 'SAN MIGUEL PALE PILSEN',
   'DEL MONTE TOMATO SAUCE', 'DEL MONTE SPAGHETTI SAUCE', 'DEL MONTE FRUIT COCKTAIL',
   'LUCKY ME PANCIT CANTON', 'LUCKY ME INSTANT NOODLES', 'LUCKY ME SUPREME',
-  'PAYLESS PANCIT CANTON',
   'NISSIN PANCIT CANTON', 'NISSIN CUP NOODLES',
   'OISHI PRAWN CRACKERS', 'OISHI MARTY', 'OISHI RIDGES',
   'JACK N JILL NOVA', 'JACK N JILL PIATTOS', 'JACK N JILL TORTILLOS',

@@ -1,13 +1,14 @@
 // src/hooks/useScannerAI.ts
 import { useState, useEffect, useRef } from 'react';
+import { Dimensions } from 'react-native';                          // ← add
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
-import * as FileSystem from 'expo-file-system';
+import { deleteAsync } from 'expo-file-system/legacy';
 
 import { recognizeText } from '../utils/ocr';
 import { processScannedText, ParsedProduct } from '../utils/scannerParser';
 import { saveItemToDB } from '../utils/database';
+import { cropPhotoToBox } from '../utils/cropToBox';               // ← add
 
 export function useScannerAI(refreshInventory: () => void) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -24,9 +25,21 @@ export function useScannerAI(refreshInventory: () => void) {
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [scanFeedback, setScanFeedback]         = useState('');
 
-  // FIX 2a: Debounce guard — prevents concurrent OCR jobs when the user
-  // taps the scan button rapidly. A ref (not state) avoids a re-render cycle.
   const isCapturing = useRef(false);
+
+  // ── Store camera container dimensions ──────────────────
+  // Defaults to window size — updated by onLayout in ScannerScreen
+  // ✅ Replace with this
+  interface LayoutSize {
+    width:  number;
+    height: number;
+  }
+
+  const cameraLayout = useRef<LayoutSize>(Dimensions.get('window'));
+
+  const setCameraLayout = (width: number, height: number) => {
+    cameraLayout.current = { width, height };
+  };
 
   useEffect(() => {
     (async () => {
@@ -43,69 +56,95 @@ export function useScannerAI(refreshInventory: () => void) {
     setScanFeedback('');
   };
 
- const captureAndRead = async () => {
-  if (isCapturing.current || !cameraRef.current) return;
+  const captureAndRead = async () => {
+    if (isCapturing.current || !cameraRef.current) return;
 
-  let photoPath: string | null = null;
-  isCapturing.current = true;
+    let originalUri: string | null = null;
+    let croppedUri:  string | null = null;
+    isCapturing.current = true;
 
-  try {
-    setIsProcessing(true);
-    resetResult();
+    try {
+      setIsProcessing(true);
+      resetResult();
 
-    const photo = await cameraRef.current.takePhoto({ flash: 'off' });
-    photoPath = photo.path;
+      const photo = await cameraRef.current.takePhoto({ flash: 'off' });
+      originalUri = `file://${photo.path}`;
 
-    // --- NEW LOGIC START ---
-    // Use the utility instead of calling TextRecognition directly
-    const result = await recognizeText(photoPath, photo.width, photo.height);
+      // ── Crop to box before OCR ──────────────────────────
+      const { width: screenW, height: screenH } = cameraLayout.current;
 
-    if (result && result.blocks.length > 0) {
-      const parsedResults = await processScannedText(
-        result.blocks,
-        photo.width,  // Use photo metadata for accuracy
+      const cropped = await cropPhotoToBox(
+        photo.path,
+        photo.width,
         photo.height,
+        screenW,
+        screenH,
       );
-    // --- NEW LOGIC END ---
+      croppedUri = cropped.uri;
 
-      if (parsedResults.confidence === 'high') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else if (parsedResults.confidence === 'medium') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      // ── OCR on the cropped region only ──────────────────
+      const result = await recognizeText(
+        croppedUri.replace('file://', ''),
+        cropped.width,
+        cropped.height,
+      );
+
+      if (result && result.blocks.length > 0) {
+        const parsedResults = await processScannedText(
+          result.blocks,
+          cropped.width,
+          cropped.height,
+        );
+
+        if (parsedResults.confidence === 'high') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else if (parsedResults.confidence === 'medium') {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+
+        setStructuredData(parsedResults);
+        setEditProduct(parsedResults.product);
+        const numericStr = parsedResults.price.replace(/[^0-9.]/g, '');
+        setEditPrice(numericStr);
+
+        if (isContinuousMode && parsedResults.price !== '---') {
+          if (parsedResults.confidence === 'high') {
+            const unitPrice = parseFloat(numericStr) || 0;
+            setScanFeedback(`✅ Auto-Saved: ${parsedResults.product}`);
+            await saveItemToDB(parsedResults.product, unitPrice, 1);
+            refreshInventory();
+            setTimeout(resetResult, 1500);
+          } else {
+            setScanFeedback('⚠  Please verify before saving');
+          }
+        }
       } else {
+        // No blocks found — likely nothing inside the box
+        setScanFeedback('⚠  No text detected — center the tag in the box');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
 
-      setStructuredData(parsedResults);
-      setEditProduct(parsedResults.product);
-      const numericStr = parsedResults.price.replace(/[^0-9.]/g, '');
-      setEditPrice(numericStr);
-
-      if (isContinuousMode && parsedResults.price !== '---') {
-        if (parsedResults.confidence === 'high') {
-          const unitPrice = parseFloat(numericStr) || 0;
-          setScanFeedback(`✅ Auto-Saved: ${parsedResults.product}`);
-          await saveItemToDB(parsedResults.product, unitPrice, 1);
-          refreshInventory();
-          setTimeout(resetResult, 1500);
-        } else {
-          setScanFeedback('⚠  Please verify before saving');
-        }
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      console.error('[Scanner] captureAndRead error:', error);
+    } finally {
+      // Always clean up both files
+      if (originalUri) {
+        deleteAsync(originalUri, { idempotent: true }).catch(
+          e => console.warn('[Scanner] Original photo cleanup failed:', e),
+        );
       }
+      if (croppedUri) {
+        deleteAsync(croppedUri, { idempotent: true }).catch(
+          e => console.warn('[Scanner] Cropped photo cleanup failed:', e),
+        );
+      }
+      setIsProcessing(false);
+      isCapturing.current = false;
     }
-  } catch (error) {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    console.error('[Scanner] captureAndRead error:', error);
-  } finally {
-    if (photoPath) {
-      FileSystem.deleteAsync(`file://${photoPath}`, { idempotent: true }).catch(
-        (e) => console.warn('[Scanner] Photo cleanup failed:', e),
-      );
-    }
-    setIsProcessing(false);
-    isCapturing.current = false;
-  }
-};
+  };
 
   return {
     device,
@@ -122,5 +161,6 @@ export function useScannerAI(refreshInventory: () => void) {
     captureAndRead,
     structuredData,   setStructuredData,
     resetResult,
+    setCameraLayout,                        // ← expose so ScannerScreen can call it
   };
 }
