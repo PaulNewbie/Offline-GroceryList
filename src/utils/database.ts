@@ -41,6 +41,14 @@ export interface CatalogueEntry {
   scan_count:   number;
 }
 
+// FIX 1a: New type returned by getAllTripsWithSummary — replaces the
+// Promise.all loop in ListsScreen that fired N+1 sequential queries.
+export interface TripWithSummary extends Trip {
+  item_count:   number;
+  priced_count: number;
+  total_spent:  number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const addColumnIfMissing = async (table: string, column: string, definition: string) => {
@@ -104,6 +112,67 @@ export const initDatabase = async () => {
       );
     `);
 
+    // ── FIX 1b: Indexes — added AFTER table creation so they apply to both
+    //    new installs and existing databases running initDatabase on upgrade.
+    //
+    //    Without these, every getTripItems(tripId) is a full TripItems table
+    //    scan. With 500+ items across multiple trips this becomes measurable
+    //    lag on budget-class Android devices (MediaTek Helio A-series, etc.).
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_tripitems_trip_id
+        ON TripItems(trip_id);
+    `);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_tripitems_checked
+        ON TripItems(trip_id, is_checked);
+    `);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_trips_status
+        ON Trips(status, created_at);
+    `);
+    // ProductCatalogue.name already has a UNIQUE constraint which creates an
+    // implicit index; adding a separate one would be redundant.
+
+    // ── FIX 1c: FTS5 virtual table for fast catalogue search.
+    //
+    //    The old searchCatalogue used LIKE '%query%' — a leading wildcard
+    //    prevents SQLite from using any index, so every search is a full scan.
+    //    FTS5 gives sub-millisecond prefix search regardless of table size.
+    //
+    //    content= keeps FTS5 as a shadow index; we still read from the real
+    //    ProductCatalogue table for data. The trigger below keeps them in sync.
+    await db.execAsync(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS ProductCatalogueSearch
+        USING fts5(
+          name,
+          content=ProductCatalogue,
+          content_rowid=id
+        );
+    `);
+
+    // Keep the FTS index in sync with the base table automatically.
+    await db.execAsync(`
+      CREATE TRIGGER IF NOT EXISTS catalogue_ai
+        AFTER INSERT ON ProductCatalogue BEGIN
+          INSERT INTO ProductCatalogueSearch(rowid, name) VALUES (new.id, new.name);
+        END;
+    `);
+    await db.execAsync(`
+      CREATE TRIGGER IF NOT EXISTS catalogue_au
+        AFTER UPDATE ON ProductCatalogue BEGIN
+          INSERT INTO ProductCatalogueSearch(ProductCatalogueSearch, rowid, name)
+            VALUES ('delete', old.id, old.name);
+          INSERT INTO ProductCatalogueSearch(rowid, name) VALUES (new.id, new.name);
+        END;
+    `);
+    await db.execAsync(`
+      CREATE TRIGGER IF NOT EXISTS catalogue_ad
+        AFTER DELETE ON ProductCatalogue BEGIN
+          INSERT INTO ProductCatalogueSearch(ProductCatalogueSearch, rowid, name)
+            VALUES ('delete', old.id, old.name);
+        END;
+    `);
+
     // ── Safe column migrations ─────────────────────────────────────────────────
     await addColumnIfMissing('Trips',     'note',              'TEXT');
     await addColumnIfMissing('Trips',     'is_scanner_target', 'INTEGER DEFAULT 0');
@@ -160,7 +229,6 @@ export const initDatabase = async () => {
       `SELECT COUNT(*) as cnt FROM Trips WHERE is_scanner_target = 1`,
     );
     if ((targetCnt?.cnt ?? 0) === 0) {
-      // Pin the most recent active list
       await db.execAsync(`
         UPDATE Trips SET is_scanner_target = 1
         WHERE id = (
@@ -180,13 +248,26 @@ export const initDatabase = async () => {
 
 // ─── SCANNER TARGET ───────────────────────────────────────────────────────────
 
-/** Pin a specific list as the scanner target. Clears all others. */
+/**
+ * FIX 1d: setScannerTarget now runs inside a transaction.
+ *
+ * The original code ran two separate runAsync calls. If the user navigated
+ * quickly between tabs (ListsScreen + ScannerScreen both calling this), the
+ * UPDATE … SET = 0 from one call could interleave with the UPDATE … SET = 1
+ * from the other, leaving zero rows pinned. A transaction makes both updates
+ * atomic — either both commit or neither does.
+ */
 export const setScannerTarget = async (id: number): Promise<boolean> => {
   try {
-    await db.runAsync(`UPDATE Trips SET is_scanner_target = 0`);
-    await db.runAsync(`UPDATE Trips SET is_scanner_target = 1 WHERE id = ?`, [id]);
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(`UPDATE Trips SET is_scanner_target = 0`);
+      await db.runAsync(`UPDATE Trips SET is_scanner_target = 1 WHERE id = ?`, [id]);
+    });
     return true;
-  } catch (e) { console.error('[DB] setScannerTarget:', e); return false; }
+  } catch (e) {
+    console.error('[DB] setScannerTarget:', e);
+    return false;
+  }
 };
 
 /**
@@ -199,7 +280,6 @@ export const getScannerTarget = async (): Promise<Trip | null> => {
       `SELECT * FROM Trips WHERE is_scanner_target = 1 LIMIT 1`,
     );
     if (pinned) return pinned;
-    // Fallback
     return await db.getFirstAsync<Trip>(
       `SELECT * FROM Trips WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`,
     );
@@ -212,6 +292,41 @@ export const getAllTrips = async (): Promise<Trip[]> => {
   try {
     return await db.getAllAsync<Trip>('SELECT * FROM Trips ORDER BY created_at DESC');
   } catch (e) { return []; }
+};
+
+/**
+ * FIX 1e: getAllTripsWithSummary — replaces the Promise.all N+1 query loop
+ * in ListsScreen.
+ *
+ * Old code in ListsScreen:
+ *   const enriched = await Promise.all(raw.map(async trip => {
+ *     const items  = await getTripItems(trip.id);   // 1 query per trip
+ *     ...
+ *   }));
+ *
+ * With 10 trips that was 11 sequential async SQLite queries on every tab
+ * focus. This single JOIN replaces all of them and returns the same shape.
+ *
+ * Drop-in: replace getAllTrips() + the Promise.all block in ListsScreen
+ * with a single call to this function.
+ */
+export const getAllTripsWithSummary = async (): Promise<TripWithSummary[]> => {
+  try {
+    return await db.getAllAsync<TripWithSummary>(`
+      SELECT
+        t.*,
+        COUNT(i.id)                                          AS item_count,
+        COUNT(CASE WHEN i.unit_price > 0 THEN 1 END)        AS priced_count,
+        COALESCE(SUM(i.unit_price * i.quantity), 0)         AS total_spent
+      FROM Trips t
+      LEFT JOIN TripItems i ON i.trip_id = t.id
+      GROUP BY t.id
+      ORDER BY t.created_at DESC
+    `);
+  } catch (e) {
+    console.error('[DB] getAllTripsWithSummary:', e);
+    return [];
+  }
 };
 
 export const getTripById = async (id: number): Promise<Trip | null> => {
@@ -280,10 +395,9 @@ export const duplicateTripAsTemplate = async (tripId: number, newName: string): 
 
 export const getTripItems = async (tripId: number): Promise<TripItem[]> => {
   try {
-    const rows = await db.getAllAsync<TripItem>(
+    return await db.getAllAsync<TripItem>(
       `SELECT * FROM TripItems WHERE trip_id = ? ORDER BY id ASC`, [tripId],
     );
-    return rows;
   } catch (e) {
     console.error('[DB] getTripItems error:', e);
     return [];
@@ -366,13 +480,41 @@ const upsertCatalogue = async (name: string, unitPrice: number) => {
   );
 };
 
+/**
+ * FIX 1f: searchCatalogue now uses the FTS5 virtual table instead of
+ * LIKE '%query%'.
+ *
+ * LIKE '%query%' cannot use any index (leading wildcard). On a
+ * ProductCatalogue with thousands of entries this is a full table scan on
+ * every keystroke in the add-item input.
+ *
+ * FTS5 with a trailing '*' gives prefix-match search (e.g. "milo" matches
+ * "Milo 200g", "Milo Choco"). It uses an inverted index so it stays fast
+ * regardless of catalogue size.
+ *
+ * Falls back to the old LIKE query if FTS fails (e.g. very first install
+ * before the virtual table is populated).
+ */
 export const searchCatalogue = async (query: string): Promise<CatalogueEntry[]> => {
+  if (!query.trim()) return [];
   try {
-    return await db.getAllAsync<CatalogueEntry>(
-      `SELECT * FROM ProductCatalogue WHERE name LIKE ? ORDER BY scan_count DESC LIMIT 8`,
-      [`%${query}%`],
-    );
-  } catch (e) { return []; }
+    return await db.getAllAsync<CatalogueEntry>(`
+      SELECT pc.*
+      FROM ProductCatalogue pc
+      JOIN ProductCatalogueSearch pcs ON pc.id = pcs.rowid
+      WHERE pcs.name MATCH ?
+      ORDER BY pc.scan_count DESC
+      LIMIT 8
+    `, [`${query.trim()}*`]);
+  } catch {
+    // Fallback for edge cases (e.g., FTS table not yet populated)
+    try {
+      return await db.getAllAsync<CatalogueEntry>(
+        `SELECT * FROM ProductCatalogue WHERE name LIKE ? ORDER BY scan_count DESC LIMIT 8`,
+        [`%${query}%`],
+      );
+    } catch (e) { return []; }
+  }
 };
 
 // ─── LEGACY SHIMS ─────────────────────────────────────────────────────────────

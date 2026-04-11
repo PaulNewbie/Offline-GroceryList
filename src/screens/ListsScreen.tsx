@@ -11,10 +11,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path, Circle, Rect, Line, Polyline } from 'react-native-svg';
 
 import {
-  getAllTrips, createTrip, deleteTrip,
+  getAllTripsWithSummary, createTrip, deleteTrip,
   completeTrip, duplicateTripAsTemplate,
-  getTripItems, formatPrice, setScannerTarget,
-  Trip,
+  formatPrice, setScannerTarget,
+  Trip, TripWithSummary,
 } from '../utils/database';
 
 const BUDGET_KEY     = 'grocery_budget';
@@ -58,14 +58,6 @@ function IconCopy({ size = 14, color = '#6B7280' }: { size?: number; color?: str
     <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
       <Rect x="4" y="4" width="8" height="9" rx="1.2" stroke={color} strokeWidth="1.5" />
       <Path d="M2 10V2.8C2 2.36 2.36 2 2.8 2H10" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-function IconChevron({ size = 16, color = '#9CA3AF' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-      <Path d="M6 4l4 4-4 4" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -171,8 +163,10 @@ function NewListModal({
 }
 
 // ─── Trip card ────────────────────────────────────────────────────────────────
+// FIX: now uses TripWithSummary — summary data comes from the JOIN query,
+// not from a separate per-trip getTripItems() call.
 function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDuplicate, onSetScanner }: {
-  trip: Trip & { itemCount: number; pricedCount: number; totalSpent: number };
+  trip: TripWithSummary;
   isScannerTarget: boolean;
   onPress: () => void;
   onComplete: () => void;
@@ -180,9 +174,9 @@ function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDupl
   onDuplicate: () => void;
   onSetScanner: () => void;
 }) {
-  const isOverBudget  = trip.totalSpent > trip.budget;
-  const pct           = Math.min((trip.totalSpent / trip.budget) * 100, 100);
-  const unpricedCount = trip.itemCount - trip.pricedCount;
+  const isOverBudget  = trip.total_spent > trip.budget;
+  const pct           = Math.min((trip.total_spent / trip.budget) * 100, 100);
+  const unpricedCount = trip.item_count - trip.priced_count;
   const isCompleted   = trip.status === 'completed';
 
   return (
@@ -191,7 +185,7 @@ function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDupl
       onPress={onPress}
       activeOpacity={0.85}
     >
-      {/* Top row: status dot + scanner badge + store */}
+      {/* Top row */}
       <View style={styles.tripCardTop}>
         <View style={styles.tripCardTopLeft}>
           <View style={[
@@ -233,15 +227,15 @@ function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDupl
         })}
       </Text>
 
-      {/* Item summary */}
+      {/* Item summary — now from JOIN, not a separate query */}
       <Text style={styles.tripMeta}>
-        {trip.itemCount} {trip.itemCount === 1 ? 'item' : 'items'}
-        {trip.pricedCount > 0 ? ` · ${trip.pricedCount} priced` : ''}
-        {unpricedCount > 0    ? ` · ${unpricedCount} no price` : ''}
+        {trip.item_count} {trip.item_count === 1 ? 'item' : 'items'}
+        {trip.priced_count > 0 ? ` · ${trip.priced_count} priced` : ''}
+        {unpricedCount > 0     ? ` · ${unpricedCount} no price`   : ''}
       </Text>
 
       {/* Budget bar */}
-      {trip.pricedCount > 0 && (
+      {trip.priced_count > 0 && (
         <>
           <View style={styles.tripBarBg}>
             <View style={[
@@ -250,7 +244,7 @@ function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDupl
             ]} />
           </View>
           <Text style={[styles.tripSpent, isOverBudget && { color: '#DC2626' }]}>
-            {formatPrice(trip.totalSpent)}
+            {formatPrice(trip.total_spent)}
             <Text style={styles.tripBudget}> / {formatPrice(trip.budget)}</Text>
           </Text>
         </>
@@ -261,7 +255,6 @@ function TripCard({ trip, isScannerTarget, onPress, onComplete, onDelete, onDupl
 
       {/* Actions */}
       <View style={styles.tripActions}>
-        {/* Set as scanner target — available for active + template */}
         {!isCompleted && !isScannerTarget && (
           <TouchableOpacity style={styles.actionBtn} onPress={onSetScanner}>
             <IconCamera size={13} color="#4F46E5" />
@@ -298,26 +291,22 @@ function SectionHeader({ label, accent }: { label: string; accent: string }) {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function ListsScreen({ navigation }: any) {
-  const [trips,           setTrips]           = useState<any[]>([]);
+  const [trips,           setTrips]           = useState<TripWithSummary[]>([]);
   const [showNewList,     setShowNewList]      = useState(false);
   const [defaultBudget,   setDefaultBudget]   = useState(DEFAULT_BUDGET);
   const [scannerTargetId, setScannerTargetId] = useState<number | null>(null);
   const isFocused = useIsFocused();
 
+  // FIX: Single query replaces the N+1 Promise.all loop.
+  // getAllTripsWithSummary returns item_count, priced_count, total_spent via
+  // a LEFT JOIN + GROUP BY — no per-trip follow-up queries needed.
   const load = useCallback(async () => {
     const saved = await AsyncStorage.getItem(BUDGET_KEY);
     if (saved) setDefaultBudget(parseFloat(saved) || DEFAULT_BUDGET);
 
-    const raw = await getAllTrips();
-    const enriched = await Promise.all(raw.map(async trip => {
-      const items      = await getTripItems(trip.id);
-      const priced     = items.filter(i => i.unit_price > 0);
-      const totalSpent = priced.reduce((s, i) => s + i.unit_price * (i.quantity ?? 1), 0);
-      return { ...trip, itemCount: items.length, pricedCount: priced.length, totalSpent };
-    }));
+    const enriched = await getAllTripsWithSummary();
     setTrips(enriched);
 
-    // Find scanner target
     const target = enriched.find(t => t.is_scanner_target === 1);
     setScannerTargetId(target?.id ?? null);
   }, []);
@@ -363,7 +352,7 @@ export default function ListsScreen({ navigation }: any) {
   const templates = trips.filter(t => t.status === 'template');
   const completed = trips.filter(t => t.status === 'completed');
 
-  const renderCard = (trip: any) => (
+  const renderCard = (trip: TripWithSummary) => (
     <TripCard
       key={trip.id}
       trip={trip}
@@ -384,12 +373,10 @@ export default function ListsScreen({ navigation }: any) {
         renderItem={null}
         ListHeaderComponent={
           <View style={styles.listContent}>
-            {/* New list button */}
             <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewList(true)} activeOpacity={0.85}>
               <Text style={styles.newBtnText}>+ New Shopping List</Text>
             </TouchableOpacity>
 
-            {/* Empty state */}
             {trips.length === 0 && (
               <View style={styles.empty}>
                 <Text style={styles.emptyIcon}>📋</Text>
@@ -401,7 +388,6 @@ export default function ListsScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* Active section */}
             {active.length > 0 && (
               <View style={styles.section}>
                 <SectionHeader label="Active" accent="#4F46E5" />
@@ -409,7 +395,6 @@ export default function ListsScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* Templates section */}
             {templates.length > 0 && (
               <View style={styles.section}>
                 <SectionHeader label="Templates" accent="#D97706" />
@@ -417,7 +402,6 @@ export default function ListsScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* History section */}
             {completed.length > 0 && (
               <View style={styles.section}>
                 <SectionHeader label="History" accent="#9CA3AF" />
@@ -447,12 +431,10 @@ const styles = StyleSheet.create({
   newBtn:     { backgroundColor: '#4F46E5', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginBottom: 20 },
   newBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 
-  // ── Section ──────────────────────────────────────────────
   section:           { marginBottom: 8 },
   sectionHeader:     { borderLeftWidth: 3, paddingLeft: 10, marginBottom: 10, marginTop: 4 },
   sectionHeaderText: { fontSize: 12, fontWeight: '800', color: '#374151', letterSpacing: 0.4, textTransform: 'uppercase' },
 
-  // ── Trip card ────────────────────────────────────────────
   tripCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
@@ -476,15 +458,9 @@ const styles = StyleSheet.create({
   statusText:        { fontSize: 12, fontWeight: '600', color: '#6B7280' },
 
   scannerTargetBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE',
   },
   scannerTargetText: { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
 
@@ -507,13 +483,11 @@ const styles = StyleSheet.create({
   actionBtnDelete:     { backgroundColor: '#FEF2F2' },
   actionBtnDeleteText: { color: '#DC2626' },
 
-  // ── Empty ────────────────────────────────────────────────
   empty:     { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyTitle:{ fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 6 },
   emptyBody: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', lineHeight: 22 },
 
-  // ── Modal ────────────────────────────────────────────────
   modalBackdrop:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   modalSheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
   dragHandle:           { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },

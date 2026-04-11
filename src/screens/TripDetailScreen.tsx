@@ -19,6 +19,8 @@ import {
   Trip, TripItem,
 } from '../utils/database';
 
+import { AddItemBar } from '../components/AddItemBar';
+
 // ─── Minimal SVG icons ────────────────────────────────────────────────────────
 
 function IconCheck({ size = 13, color = '#059669' }: { size?: number; color?: string }) {
@@ -428,89 +430,6 @@ function BudgetCard({
       {items.length > 0 && (
         <Text style={styles.swipeHint}>swipe right to edit  ·  swipe left to delete</Text>
       )}
-    </View>
-  );
-}
-
-// ─── Add item bar ─────────────────────────────────────────────────────────────
-function AddItemBar({ onAdd }: { onAdd: (product: string, unitPrice: number, qty: number, note: string) => void }) {
-  const [product,   setProduct]   = useState('');
-  const [price,     setPrice]     = useState('');
-  const [qty,       setQty]       = useState(1);
-  const [note,      setNote]      = useState('');
-  const [showExtra, setShowExtra] = useState(false);
-  const inputRef = useRef<TextInput>(null);
-
-  const handleAdd = () => {
-    const name = product.trim();
-    if (!name) return;
-    onAdd(name, parseFloat(price) || 0, qty, note.trim());
-    setProduct(''); setPrice(''); setQty(1); setNote(''); setShowExtra(false);
-    inputRef.current?.focus();
-  };
-
-  return (
-    <View style={styles.addBar}>
-      {showExtra && (
-        <View style={styles.addBarExtra}>
-          <View style={styles.addBarPriceWrap}>
-            <Text style={styles.addBarPesoPrefix}>₱</Text>
-            <TextInput
-              style={styles.addBarPriceInput}
-              value={price}
-              onChangeText={setPrice}
-              placeholder="Price (optional)"
-              placeholderTextColor="#C4C4C4"
-              keyboardType="decimal-pad"
-              returnKeyType="done"
-            />
-          </View>
-          <View style={styles.addBarStepper}>
-            <TouchableOpacity style={styles.stepBtn} onPress={() => setQty(q => Math.max(1, q - 1))} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.stepBtnText}>−</Text>
-            </TouchableOpacity>
-            <Text style={styles.stepValue}>{qty}</Text>
-            <TouchableOpacity style={styles.stepBtn} onPress={() => setQty(q => q + 1)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.stepBtnText}>+</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {showExtra && (
-        <TextInput
-          style={styles.addBarNoteInput}
-          value={note}
-          onChangeText={setNote}
-          placeholder="Note (optional) — e.g. buy the big one"
-          placeholderTextColor="#C4C4C4"
-          returnKeyType="done"
-        />
-      )}
-
-      <View style={styles.addBarRow}>
-        <TextInput
-          ref={inputRef}
-          style={styles.addBarInput}
-          value={product}
-          onChangeText={setProduct}
-          placeholder="Add an item…"
-          placeholderTextColor="#C4C4C4"
-          returnKeyType="done"
-          onSubmitEditing={handleAdd}
-          blurOnSubmit={false}
-        />
-        <TouchableOpacity style={styles.addBarToggle} onPress={() => setShowExtra(s => !s)}>
-          <Text style={styles.addBarToggleText}>{showExtra ? '▲' : '₱+'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.addBarBtn, !product.trim() && styles.addBarBtnDisabled]}
-          onPress={handleAdd}
-          disabled={!product.trim()}
-        >
-          <Text style={styles.addBarBtnText}>Add</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
