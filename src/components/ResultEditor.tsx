@@ -1,5 +1,5 @@
 // src/components/ResultEditor.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -11,9 +11,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Line, Rect } from 'react-native-svg';
+
 import { ConfidenceLevel } from '../utils/scannerParser';
+import { useVoiceInput } from '../hooks/useVoiceInput';
 
 // ─── Confidence config ────────────────────────────────────────────────────────
 const CONFIDENCE_CONFIG: Record<
@@ -25,11 +29,97 @@ const CONFIDENCE_CONFIG: Record<
   low:    { border: '#DC2626', bg: '#FEF2F2', pill: '#DC2626', pillText: '#FFF', label: 'Tap to edit',   icon: '✎' },
 };
 
+const NO_PRICE_CONFIG = {
+  border: '#D97706', bg: '#FFFBEB', pill: '#D97706', pillText: '#FFF', label: 'Please verify', icon: '⚠',
+};
+
 const formatPeso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// ─── Mic SVG icon ─────────────────────────────────────────────────────────────
+function MicIcon({ size = 20, color = '#4F46E5' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="9" y="2" width="6" height="11" rx="3" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+      <Path d="M5 10a7 7 0 0 0 14 0" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Line x1="12" y1="17" x2="12" y2="21" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Line x1="9"  y1="21" x2="15" y2="21" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+// ─── Animated mic button ──────────────────────────────────────────────────────
+function VoiceMicButton({
+  state,
+  transcript,
+  onPress,
+}: {
+  state: 'idle' | 'listening' | 'processing' | 'error';
+  transcript: string;
+  onPress: () => void;
+}) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  const anim  = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    if (state === 'listening') {
+      anim.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1.2, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 1,   duration: 600, useNativeDriver: true }),
+        ]),
+      );
+      anim.current.start();
+    } else {
+      anim.current?.stop();
+      pulse.setValue(1);
+    }
+    return () => { anim.current?.stop(); };
+  }, [state]);
+
+  const isListening  = state === 'listening';
+  const isProcessing = state === 'processing';
+  const isError      = state === 'error';
+
+  const bgColor     = isListening ? '#DC2626' : isError ? '#FEF2F2' : '#EEF2FF';
+  const iconColor   = isListening ? '#FFFFFF'  : isError ? '#DC2626' : '#4F46E5';
+  const borderColor = isListening ? '#DC2626'  : isError ? '#FECACA' : '#C7D2FE';
+
+  return (
+    <View style={styles.micWrap}>
+      {/* Live transcript tooltip bubble */}
+      {isListening && transcript.length > 0 && (
+        <View style={styles.transcriptBubble}>
+          <Text style={styles.transcriptText} numberOfLines={2}>{transcript}</Text>
+        </View>
+      )}
+
+      {/* Label above the button */}
+      <Text style={[styles.micHint, isListening && styles.micHintListening, isError && styles.micHintError]}>
+        {isError ? 'Try again' : isListening ? 'Listening…' : isProcessing ? 'Parsing…' : 'Voice'}
+      </Text>
+
+      <Animated.View style={{ transform: [{ scale: pulse }] }}>
+        <TouchableOpacity
+          style={[styles.micBtn, { backgroundColor: bgColor, borderColor }]}
+          onPress={onPress}
+          activeOpacity={0.8}
+          disabled={isProcessing}
+        >
+          {isProcessing
+            ? <ActivityIndicator color="#4F46E5" size="small" />
+            : <MicIcon size={20} color={iconColor} />
+          }
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Red recording indicator dot */}
+      {isListening && <View style={styles.recordingDot} />}
+    </View>
+  );
+}
+
 // ─── Manual Entry Modal ───────────────────────────────────────────────────────
-// onConfirm now receives (product, unitPrice: number, qty: number)
 function ManualEntryModal({
   visible,
   onClose,
@@ -39,9 +129,9 @@ function ManualEntryModal({
   onClose: () => void;
   onConfirm: (product: string, unitPrice: number, qty: number) => void;
 }) {
-  const insets   = useSafeAreaInsets();
+  const insets    = useSafeAreaInsets();
   const [product, setProduct] = useState('');
-  const [price,   setPrice]   = useState('');   // plain numeric string
+  const [price,   setPrice]   = useState('');
   const [qty,     setQty]     = useState(1);
 
   const unitPrice  = parseFloat(price) || 0;
@@ -121,7 +211,6 @@ function ManualEntryModal({
             </View>
           </View>
 
-          {/* Live line total */}
           {unitPrice > 0 && (
             <View style={styles.modalTotalRow}>
               <Text style={styles.modalTotalLabel}>Line total</Text>
@@ -149,15 +238,41 @@ function ManualEntryModal({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ResultEditor({ scanner, onSave, onViewInventory, onManualSave }: any) {
-  const insets = useSafeAreaInsets();
-  const [showManual, setShowManual] = useState(false);
+  const [showManual,    setShowManual]    = useState(false);
+  const [voiceFeedback, setVoiceFeedback] = useState('');
 
+  // ── Voice input ─────────────────────────────────────────────────────────────
+  const voice = useVoiceInput({
+    onResult: (parsed) => {
+      if (parsed.product) scanner.setEditProduct(parsed.product);
+      if (parsed.price)   scanner.setEditPrice(parsed.price);
+      if (parsed.qty > 1) scanner.setQuantity(parsed.qty);
+
+      // Brief confirmation pill
+      const parts: string[] = [];
+      if (parsed.product)               parts.push(parsed.product);
+      if (parseFloat(parsed.price) > 0) parts.push(`₱${parsed.price}`);
+      if (parsed.qty > 1)               parts.push(`×${parsed.qty}`);
+      setVoiceFeedback(`🎤 ${parts.join(' · ')}`);
+      setTimeout(() => setVoiceFeedback(''), 3000);
+    },
+    onError: (msg) => {
+      setVoiceFeedback(`⚠ ${msg}`);
+      setTimeout(() => setVoiceFeedback(''), 3000);
+    },
+  });
+
+  // ── Confidence logic ────────────────────────────────────────────────────────
   const hasResult = !!scanner.structuredData;
-  const confidence: ConfidenceLevel =
-    hasResult ? (scanner.structuredData?.confidence ?? 'low') : 'high';
-  const cfg = CONFIDENCE_CONFIG[confidence];
+  const hasPrice  = hasResult && scanner.editPrice && parseFloat(scanner.editPrice) > 0;
 
-  // editPrice is a plain numeric string e.g. "52.00"
+  const baseConfidence: ConfidenceLevel =
+    hasResult ? (scanner.structuredData?.confidence ?? 'low') : 'high';
+  const confidence: ConfidenceLevel =
+    hasResult && !hasPrice && baseConfidence === 'high' ? 'medium' : baseConfidence;
+
+  const cfg = hasResult && !hasPrice ? NO_PRICE_CONFIG : CONFIDENCE_CONFIG[confidence];
+
   const unitPrice = parseFloat(scanner.editPrice) || 0;
   const qty       = scanner.quantity ?? 1;
   const lineTotal = unitPrice * qty;
@@ -189,6 +304,14 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
             {scanner.isContinuousMode ? 'Auto-Save ON' : 'Auto-Save'}
           </Text>
         </TouchableOpacity>
+      </View>
+
+      {/* ── OCR accuracy notice ── */}
+      <View style={styles.ocrNoticeBanner}>
+        <Text style={styles.ocrNoticeText}>
+          ✏️  Always check the <Text style={styles.ocrNoticeEmphasis}>product name</Text> and{' '}
+          <Text style={styles.ocrNoticeEmphasis}>unit price</Text> before saving — tap either field to edit.
+        </Text>
       </View>
 
       {/* ── Product + Price/Qty cards ── */}
@@ -227,24 +350,30 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         <View style={[styles.infoCard, styles.infoCardPrice]}>
           <View>
             <Text style={styles.infoLabel}>UNIT PRICE</Text>
-            {/* Show ₱ prefix inside the card, input holds plain number */}
             <View style={styles.priceInputRow}>
               <Text style={styles.pesoSymbol}>₱</Text>
               <TextInput
-                style={styles.priceInput}
+                style={[
+                  styles.priceInput,
+                  hasResult && !hasPrice && { color: '#D97706' },
+                ]}
                 value={scanner.editPrice}
                 onChangeText={scanner.setEditPrice}
                 placeholder="0.00"
-                placeholderTextColor="#C4C4C4"
+                placeholderTextColor={hasResult && !hasPrice ? '#F6C065' : '#C4C4C4'}
                 keyboardType="decimal-pad"
               />
             </View>
-            {hasResult && <Text style={styles.editHint}>✎ Tap to edit</Text>}
+            {hasResult && !hasPrice
+              ? <Text style={[styles.editHint, { color: '#D97706' }]}>⚠ Enter price</Text>
+              : hasResult && hasPrice
+              ? <Text style={styles.editHint}>✎ Tap to edit</Text>
+              : null
+            }
           </View>
 
           <View style={styles.cardDivider} />
 
-          {/* Quantity stepper */}
           <View>
             <Text style={styles.infoLabel}>QTY</Text>
             <View style={styles.stepper}>
@@ -266,7 +395,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
             </View>
           </View>
 
-          {/* Line total — only show when qty > 1 */}
           {qty > 1 && unitPrice > 0 && (
             <>
               <View style={styles.cardDivider} />
@@ -279,23 +407,33 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </View>
       </View>
 
-      {/* ── Confidence hint ── */}
-      {hasResult && confidence !== 'high' && (
+      {/* ── Confidence / no-price hint banner ── */}
+      {hasResult && (confidence !== 'high' || !hasPrice) && (
         <View style={[styles.hintBanner, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
           <Text style={[styles.hintText, { color: cfg.border }]}>
-            {confidence === 'medium'
-              ? '⚠  Scanner isn\'t 100% sure — check the product name before saving.'
+            {!hasPrice
+              ? '⚠  No price detected — please type it in the Unit Price field above.'
+              : confidence === 'medium'
+              ? "⚠  Scanner isn't 100% sure — check the product name before saving."
               : '✎  Couldn\'t read clearly. Please edit the product name above.'}
           </Text>
         </View>
       )}
 
-      {/* ── Auto-save feedback ── */}
-      {scanner.scanFeedback ? (
-        <View style={styles.feedbackPill}>
-          <Text style={styles.feedbackText}>{scanner.scanFeedback}</Text>
+      {/* ── Scan / voice feedback pill ── */}
+      {(scanner.scanFeedback || voiceFeedback) && (
+        <View style={[
+          styles.feedbackPill,
+          voiceFeedback ? styles.feedbackPillVoice : undefined,
+        ]}>
+          <Text style={[
+            styles.feedbackText,
+            voiceFeedback ? styles.feedbackTextVoice : undefined,
+          ]}>
+            {voiceFeedback || scanner.scanFeedback}
+          </Text>
         </View>
-      ) : null}
+      )}
 
       {/* ── CTA buttons ── */}
       <View style={styles.ctaRow}>
@@ -335,16 +473,33 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         )}
       </View>
 
-      {/* ── Footer links ── */}
+      {/* ── Footer: Add Manually | [MIC] | View List ── */}
       <View style={styles.footerRow}>
         <TouchableOpacity onPress={() => setShowManual(true)} style={styles.footerLink}>
           <Text style={styles.footerLinkText}>+ Add Manually</Text>
         </TouchableOpacity>
+
         <View style={styles.footerDivider} />
+
+        <VoiceMicButton
+          state={voice.state}
+          transcript={voice.transcript}
+          onPress={voice.toggle}
+        />
+
+        <View style={styles.footerDivider} />
+
         <TouchableOpacity onPress={onViewInventory} style={styles.footerLink}>
           <Text style={styles.footerLinkText}>View List →</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── Voice usage hint shown only before first scan/voice ── */}
+      {!hasResult && voice.state === 'idle' && (
+        <Text style={styles.voiceUsageHint}>
+          🎤  Try saying "Milo 52 pesos" or "Lucky Me dalawa 13 pesos"
+        </Text>
+      )}
 
       <ManualEntryModal
         visible={showManual}
@@ -363,57 +518,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F7F4',
   },
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 14,
-    position: 'relative',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    marginTop: 8, marginBottom: 10, position: 'relative',
   },
-  dragHandle: {
-    width: 36,
-    height: 4,
-    backgroundColor: '#D1D5DB',
-    borderRadius: 2,
-  },
+  dragHandle: { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2 },
   autoSavePill: {
-    position: 'absolute',
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    position: 'absolute', right: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#F3F4F6', borderRadius: 20,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
   autoSavePillActive:     { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
   autoSaveDot:            { width: 6, height: 6, borderRadius: 3 },
   autoSavePillText:       { fontSize: 11, fontWeight: '700', color: '#6B7280', letterSpacing: 0.2 },
   autoSavePillTextActive: { color: '#FFFFFF' },
 
+  ocrNoticeBanner: {
+    backgroundColor: '#F0F4FF', borderRadius: 10,
+    borderWidth: 1, borderColor: '#C7D2FE',
+    paddingVertical: 7, paddingHorizontal: 12, marginBottom: 10,
+  },
+  ocrNoticeText:     { fontSize: 11, color: '#4338CA', lineHeight: 16, fontWeight: '500' },
+  ocrNoticeEmphasis: { fontWeight: '800', color: '#3730A3' },
+
   infoRow:         { flexDirection: 'row', gap: 10, marginBottom: 10 },
   infoCard:        { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, borderWidth: 1.5, borderColor: '#E5E7EB' },
   infoCardProduct: { flex: 1.6 },
   infoCardPrice:   { flex: 1, justifyContent: 'space-between' },
 
-  labelRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  infoLabel:     { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8 },
-  editHint:      { fontSize: 10, color: '#C4C4C4', marginTop: 4, fontStyle: 'italic' },
-
+  labelRow:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  infoLabel:          { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8 },
+  editHint:           { fontSize: 10, color: '#C4C4C4', marginTop: 4, fontStyle: 'italic' },
   confidencePill:     { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 20 },
   confidencePillText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.3 },
 
-  productInput: { fontSize: 16, fontWeight: '700', color: '#111827', padding: 0, lineHeight: 22 },
-
+  productInput:  { fontSize: 16, fontWeight: '700', color: '#111827', padding: 0, lineHeight: 22 },
   priceInputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   pesoSymbol:    { fontSize: 18, fontWeight: '800', color: '#059669', marginRight: 2 },
   priceInput:    { fontSize: 22, fontWeight: '800', color: '#059669', padding: 0, flex: 1 },
 
   cardDivider:   { height: 1, backgroundColor: '#F3F4F6', marginVertical: 10 },
-
   stepper:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   stepBtn:       { width: 28, height: 28, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   stepBtnText:   { fontSize: 16, fontWeight: '700', color: '#374151', lineHeight: 20 },
@@ -423,25 +568,61 @@ const styles = StyleSheet.create({
   hintBanner: { borderRadius: 12, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10 },
   hintText:   { fontSize: 12, fontWeight: '600', lineHeight: 18 },
 
-  feedbackPill: { backgroundColor: '#ECFDF5', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, alignSelf: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#A7F3D0' },
-  feedbackText: { color: '#059669', fontSize: 13, fontWeight: '600' },
+  feedbackPill:      { backgroundColor: '#ECFDF5', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, alignSelf: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#A7F3D0' },
+  feedbackPillVoice: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
+  feedbackText:      { color: '#059669', fontSize: 13, fontWeight: '600' },
+  feedbackTextVoice: { color: '#4338CA' },
 
-  ctaRow:    { gap: 6, marginBottom: 8 },
-  btn:       { borderRadius: 18, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
-  btnScan:   { backgroundColor: '#4F46E5' },
-  btnSave:   { backgroundColor: '#059669' },
-  btnDisabled: { backgroundColor: '#D1D5DB' },
-  btnText:   { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+  ctaRow:     { gap: 6, marginBottom: 8 },
+  btn:        { borderRadius: 18, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  btnScan:    { backgroundColor: '#4F46E5' },
+  btnSave:    { backgroundColor: '#059669' },
+  btnDisabled:{ backgroundColor: '#D1D5DB' },
+  btnText:    { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
 
-  scanAgainBtn:  { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
-  scanAgainText: { color: '#4F46E5', fontSize: 13, fontWeight: '700' },
+  scanAgainBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
+  scanAgainText:{ color: '#4F46E5', fontSize: 13, fontWeight: '700' },
 
-  footerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 12 },
+  // ── Footer ──────────────────────────────────────────────────────────────────
+  footerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 10 },
   footerLink:    { paddingVertical: 4, paddingHorizontal: 8 },
   footerLinkText:{ color: '#4F46E5', fontSize: 13, fontWeight: '600' },
   footerDivider: { width: 1, height: 14, backgroundColor: '#D1D5DB' },
 
-  // ── Manual modal ──
+  // ── Voice mic ────────────────────────────────────────────────────────────────
+  micWrap: { alignItems: 'center', position: 'relative' },
+  micBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  micHint:         { fontSize: 9, fontWeight: '600', color: '#9CA3AF', marginBottom: 3, letterSpacing: 0.2 },
+  micHintListening:{ fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 3 },
+  micHintError:    { fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 3 },
+  recordingDot: {
+    position: 'absolute', top: 20, right: -2,
+    width: 9, height: 9, borderRadius: 5,
+    backgroundColor: '#DC2626',
+    borderWidth: 1.5, borderColor: '#FFFFFF',
+  },
+  transcriptBubble: {
+    position: 'absolute',
+    bottom: 60,
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    width: 210,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  transcriptText:  { color: '#FFFFFF', fontSize: 12, fontWeight: '500', lineHeight: 16 },
+  voiceUsageHint:  { fontSize: 10, color: '#C4C4C4', textAlign: 'center', marginTop: 2, marginBottom: 4, fontStyle: 'italic' },
+
+  // ── Manual modal ─────────────────────────────────────────────────────────────
   modalBackdrop:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   modalSheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12 },
   modalTitle:           { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 4, marginTop: 8 },
