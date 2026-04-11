@@ -248,7 +248,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
       if (parsed.price)   scanner.setEditPrice(parsed.price);
       if (parsed.qty > 1) scanner.setQuantity(parsed.qty);
 
-      // Brief confirmation pill
       const parts: string[] = [];
       if (parsed.product)               parts.push(parsed.product);
       if (parseFloat(parsed.price) > 0) parts.push(`₱${parsed.price}`);
@@ -283,9 +282,9 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
     unitPrice > 0;
 
   return (
-    <View style={[styles.sheet, { paddingBottom: 10 }]}>
+    <View style={styles.sheet}>
 
-      {/* ── Top bar ── */}
+      {/* ── Top bar: drag handle + auto-save toggle ── */}
       <View style={styles.topBar}>
         <View style={styles.dragHandle} />
         <TouchableOpacity
@@ -306,18 +305,10 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </TouchableOpacity>
       </View>
 
-      {/* ── OCR accuracy notice ── */}
-      <View style={styles.ocrNoticeBanner}>
-        <Text style={styles.ocrNoticeText}>
-          ✏️  Always check the <Text style={styles.ocrNoticeEmphasis}>product name</Text> and{' '}
-          <Text style={styles.ocrNoticeEmphasis}>unit price</Text> before saving — tap either field to edit.
-        </Text>
-      </View>
-
       {/* ── Product + Price/Qty cards ── */}
       <View style={styles.infoRow}>
 
-        {/* Product card */}
+        {/* Product card — taller, with inline hint replacing the old banner */}
         <View style={[
           styles.infoCard,
           styles.infoCardProduct,
@@ -331,6 +322,7 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
               </View>
             )}
           </View>
+
           <TextInput
             style={[
               styles.productInput,
@@ -341,9 +333,19 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
             placeholder="Align tag in box…"
             placeholderTextColor="#C4C4C4"
             multiline
-            numberOfLines={2}
+            numberOfLines={3}
           />
-          {hasResult && <Text style={styles.editHint}>✎ Tap to edit</Text>}
+
+          {/* Inline hint replaces old banner — sits naturally at the card bottom */}
+          <Text style={styles.inlineHint}>
+            {!hasResult
+              ? '✏️  Tap to type manually'
+              : !hasPrice
+              ? '⚠  No price — enter it on the right'
+              : confidence !== 'high'
+              ? '⚠  Verify name before saving'
+              : '✓  Tap to edit if needed'}
+          </Text>
         </View>
 
         {/* Price + Qty card */}
@@ -364,12 +366,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
                 keyboardType="decimal-pad"
               />
             </View>
-            {hasResult && !hasPrice
-              ? <Text style={[styles.editHint, { color: '#D97706' }]}>⚠ Enter price</Text>
-              : hasResult && hasPrice
-              ? <Text style={styles.editHint}>✎ Tap to edit</Text>
-              : null
-            }
           </View>
 
           <View style={styles.cardDivider} />
@@ -407,19 +403,6 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </View>
       </View>
 
-      {/* ── Confidence / no-price hint banner ── */}
-      {hasResult && (confidence !== 'high' || !hasPrice) && (
-        <View style={[styles.hintBanner, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
-          <Text style={[styles.hintText, { color: cfg.border }]}>
-            {!hasPrice
-              ? '⚠  No price detected — please type it in the Unit Price field above.'
-              : confidence === 'medium'
-              ? "⚠  Scanner isn't 100% sure — check the product name before saving."
-              : '✎  Couldn\'t read clearly. Please edit the product name above.'}
-          </Text>
-        </View>
-      )}
-
       {/* ── Scan / voice feedback pill ── */}
       {(scanner.scanFeedback || voiceFeedback) && (
         <View style={[
@@ -436,42 +419,42 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
       )}
 
       {/* ── CTA buttons ── */}
-      <View style={styles.ctaRow}>
-        {canSave ? (
-          <>
-            <TouchableOpacity
-              style={[styles.btn, styles.btnSave]}
-              onPress={onSave}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.btnText}>Save to List</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.scanAgainBtn}
-              onPress={scanner.captureAndRead}
-              disabled={scanner.isProcessing}
-              activeOpacity={0.75}
-            >
-              {scanner.isProcessing
-                ? <ActivityIndicator color="#4F46E5" size="small" />
-                : <Text style={styles.scanAgainText}>↺  Scan Again</Text>
-              }
-            </TouchableOpacity>
-          </>
-        ) : (
+      {canSave ? (
+        /* Save + Scan Again side-by-side */
+        <View style={styles.ctaRowSplit}>
           <TouchableOpacity
-            style={[styles.btn, styles.btnScan, scanner.isProcessing && styles.btnDisabled]}
-            onPress={scanner.captureAndRead}
-            disabled={scanner.isProcessing}
+            style={[styles.btn, styles.btnSave, { flex: 1 }]}
+            onPress={onSave}
             activeOpacity={0.85}
           >
+            <Text style={styles.btnText}>Save to List</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.scanAgainBtn}
+            onPress={scanner.captureAndRead}
+            disabled={scanner.isProcessing}
+            activeOpacity={0.75}
+          >
             {scanner.isProcessing
-              ? <ActivityIndicator color="#FFFFFF" />
-              : <Text style={styles.btnText}>Scan Tag</Text>
+              ? <ActivityIndicator color="#4F46E5" size="small" />
+              : <Text style={styles.scanAgainText}>↺  Again</Text>
             }
           </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      ) : (
+        /* Scan Tag full-width */
+        <TouchableOpacity
+          style={[styles.btn, styles.btnScan, scanner.isProcessing && styles.btnDisabled]}
+          onPress={scanner.captureAndRead}
+          disabled={scanner.isProcessing}
+          activeOpacity={0.85}
+        >
+          {scanner.isProcessing
+            ? <ActivityIndicator color="#FFFFFF" />
+            : <Text style={styles.btnText}>Scan Tag</Text>
+          }
+        </TouchableOpacity>
+      )}
 
       {/* ── Footer: Add Manually | [MIC] | View List ── */}
       <View style={styles.footerRow}>
@@ -494,7 +477,7 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
         </TouchableOpacity>
       </View>
 
-      {/* ── Voice usage hint shown only before first scan/voice ── */}
+      {/* Voice usage hint — only before first scan/voice */}
       {!hasResult && voice.state === 'idle' && (
         <Text style={styles.voiceUsageHint}>
           🎤  Try saying "Milo 52 pesos" or "Lucky Me dalawa 13 pesos"
@@ -513,15 +496,26 @@ export default function ResultEditor({ scanner, onSave, onViewInventory, onManua
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   sheet: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingTop: 0,
+    paddingBottom: 8,
     backgroundColor: '#F8F7F4',
   },
+
+  // ── Top bar ─────────────────────────────────────────────
   topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    marginTop: 8, marginBottom: 10, position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    marginBottom: 8,
+    position: 'relative',
   },
-  dragHandle: { width: 36, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2 },
+  dragHandle: {
+    width: 36, height: 4,
+    backgroundColor: '#D1D5DB',
+    borderRadius: 2,
+  },
   autoSavePill: {
     position: 'absolute', right: 0,
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -534,80 +528,120 @@ const styles = StyleSheet.create({
   autoSavePillText:       { fontSize: 11, fontWeight: '700', color: '#6B7280', letterSpacing: 0.2 },
   autoSavePillTextActive: { color: '#FFFFFF' },
 
-  ocrNoticeBanner: {
-    backgroundColor: '#F0F4FF', borderRadius: 10,
-    borderWidth: 1, borderColor: '#C7D2FE',
-    paddingVertical: 7, paddingHorizontal: 12, marginBottom: 10,
+  // ── Info cards row ──────────────────────────────────────
+  infoRow:         { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  infoCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
   },
-  ocrNoticeText:     { fontSize: 11, color: '#4338CA', lineHeight: 16, fontWeight: '500' },
-  ocrNoticeEmphasis: { fontWeight: '800', color: '#3730A3' },
-
-  infoRow:         { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  infoCard:        { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, borderWidth: 1.5, borderColor: '#E5E7EB' },
-  infoCardProduct: { flex: 1.6 },
-  infoCardPrice:   { flex: 1, justifyContent: 'space-between' },
+  // Product card: taller via minHeight + flex
+  infoCardProduct: {
+    flex: 1.6,
+    minHeight: 130,
+    justifyContent: 'space-between',
+  },
+  infoCardPrice: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
 
   labelRow:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   infoLabel:          { fontSize: 10, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.8 },
-  editHint:           { fontSize: 10, color: '#C4C4C4', marginTop: 4, fontStyle: 'italic' },
   confidencePill:     { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 20 },
   confidencePillText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.3 },
 
-  productInput:  { fontSize: 16, fontWeight: '700', color: '#111827', padding: 0, lineHeight: 22 },
+  // Taller product text input — flex:1 lets it grow to fill the card
+  productInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    padding: 0,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+  },
+
+  // Small muted hint at card bottom (replaces the old orange banner)
+  inlineHint: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+    marginTop: 6,
+    lineHeight: 14,
+  },
+
   priceInputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   pesoSymbol:    { fontSize: 18, fontWeight: '800', color: '#059669', marginRight: 2 },
-  priceInput:    { fontSize: 22, fontWeight: '800', color: '#059669', padding: 0, flex: 1 },
+  priceInput:    { fontSize: 20, fontWeight: '800', color: '#059669', padding: 0, flex: 1 },
 
-  cardDivider:   { height: 1, backgroundColor: '#F3F4F6', marginVertical: 10 },
-  stepper:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
-  stepBtn:       { width: 28, height: 28, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  stepBtnText:   { fontSize: 16, fontWeight: '700', color: '#374151', lineHeight: 20 },
-  stepValue:     { fontSize: 18, fontWeight: '800', color: '#111827', minWidth: 24, textAlign: 'center' },
-  lineTotalText: { fontSize: 15, fontWeight: '800', color: '#059669', marginTop: 4 },
+  cardDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 8 },
+  stepper:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  stepBtn:     { width: 28, height: 28, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  stepBtnText: { fontSize: 16, fontWeight: '700', color: '#374151', lineHeight: 20 },
+  stepValue:   { fontSize: 18, fontWeight: '800', color: '#111827', minWidth: 24, textAlign: 'center' },
+  lineTotalText: { fontSize: 14, fontWeight: '800', color: '#059669', marginTop: 4 },
 
-  hintBanner: { borderRadius: 12, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10 },
-  hintText:   { fontSize: 12, fontWeight: '600', lineHeight: 18 },
-
-  feedbackPill:      { backgroundColor: '#ECFDF5', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, alignSelf: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#A7F3D0' },
+  // ── Feedback pill ───────────────────────────────────────
+  feedbackPill:      { backgroundColor: '#ECFDF5', borderRadius: 20, paddingVertical: 6, paddingHorizontal: 14, alignSelf: 'center', marginBottom: 6, borderWidth: 1, borderColor: '#A7F3D0' },
   feedbackPillVoice: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
-  feedbackText:      { color: '#059669', fontSize: 13, fontWeight: '600' },
+  feedbackText:      { color: '#059669', fontSize: 12, fontWeight: '600' },
   feedbackTextVoice: { color: '#4338CA' },
 
-  ctaRow:     { gap: 6, marginBottom: 8 },
-  btn:        { borderRadius: 18, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
-  btnScan:    { backgroundColor: '#4F46E5' },
-  btnSave:    { backgroundColor: '#059669' },
-  btnDisabled:{ backgroundColor: '#D1D5DB' },
-  btnText:    { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+  // ── CTA buttons ─────────────────────────────────────────
+  // Save + Scan Again side-by-side
+  ctaRowSplit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  btn:         { borderRadius: 16, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  btnScan:     { backgroundColor: '#4F46E5' },
+  btnSave:     { backgroundColor: '#059669' },
+  btnDisabled: { backgroundColor: '#D1D5DB' },
+  btnText:     { color: '#FFFFFF', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
 
-  scanAgainBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
-  scanAgainText:{ color: '#4F46E5', fontSize: 13, fontWeight: '700' },
+  // Compact "↺ Again" pill sitting beside Save
+  scanAgainBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#4F46E5',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanAgainText: { color: '#4F46E5', fontSize: 14, fontWeight: '700' },
 
-  // ── Footer ──────────────────────────────────────────────────────────────────
-  footerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 10 },
+  // ── Footer ──────────────────────────────────────────────
+  footerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 4, gap: 10 },
   footerLink:    { paddingVertical: 4, paddingHorizontal: 8 },
   footerLinkText:{ color: '#4F46E5', fontSize: 13, fontWeight: '600' },
   footerDivider: { width: 1, height: 14, backgroundColor: '#D1D5DB' },
 
-  // ── Voice mic ────────────────────────────────────────────────────────────────
+  // ── Voice mic ────────────────────────────────────────────
   micWrap: { alignItems: 'center', position: 'relative' },
   micBtn: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1.5,
   },
-  micHint:         { fontSize: 9, fontWeight: '600', color: '#9CA3AF', marginBottom: 3, letterSpacing: 0.2 },
-  micHintListening:{ fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 3 },
-  micHintError:    { fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 3 },
+  micHint:          { fontSize: 9, fontWeight: '600', color: '#9CA3AF', marginBottom: 2, letterSpacing: 0.2 },
+  micHintListening: { fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 2 },
+  micHintError:     { fontSize: 9, fontWeight: '700', color: '#DC2626', marginBottom: 2 },
   recordingDot: {
-    position: 'absolute', top: 20, right: -2,
+    position: 'absolute', top: 18, right: -2,
     width: 9, height: 9, borderRadius: 5,
     backgroundColor: '#DC2626',
     borderWidth: 1.5, borderColor: '#FFFFFF',
   },
   transcriptBubble: {
     position: 'absolute',
-    bottom: 60,
+    bottom: 58,
     backgroundColor: '#1F2937',
     borderRadius: 12,
     paddingHorizontal: 12,
@@ -619,10 +653,10 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
-  transcriptText:  { color: '#FFFFFF', fontSize: 12, fontWeight: '500', lineHeight: 16 },
-  voiceUsageHint:  { fontSize: 10, color: '#C4C4C4', textAlign: 'center', marginTop: 2, marginBottom: 4, fontStyle: 'italic' },
+  transcriptText: { color: '#FFFFFF', fontSize: 12, fontWeight: '500', lineHeight: 16 },
+  voiceUsageHint: { fontSize: 10, color: '#C4C4C4', textAlign: 'center', marginTop: 2, marginBottom: 2, fontStyle: 'italic' },
 
-  // ── Manual modal ─────────────────────────────────────────────────────────────
+  // ── Manual modal ─────────────────────────────────────────
   modalBackdrop:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   modalSheet:           { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12 },
   modalTitle:           { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 4, marginTop: 8 },
