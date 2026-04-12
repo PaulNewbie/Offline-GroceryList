@@ -16,8 +16,11 @@ import {
   updateItem, deleteItem, clearItems,
   toggleItemChecked, completeTrip,
   updateTrip, formatPrice,
-  Trip, TripItem,
+  Trip, TripItem, setTripSchedule,
 } from '../utils/database';
+
+import ScheduleDatePicker from '../components/ScheduleDatePicker';
+import { scheduleTripNotification, cancelTripNotification } from '../utils/notifications';
 
 import { AddItemBar } from '../components/AddItemBar';
 
@@ -269,15 +272,25 @@ function TripHeader({
   const [editing, setEditing]   = useState(false);
   const [name,    setName]      = useState(trip.name);
   const [note,    setNote]      = useState(trip.note ?? '');
+  const [scheduledAt, setScheduledAt] = useState<string | null>(trip.scheduled_at ?? null);
 
   useEffect(() => {
     setName(trip.name);
     setNote(trip.note ?? '');
+    setScheduledAt(trip.scheduled_at ?? null);
   }, [trip]);
 
   const handleSave = () => {
     if (!name.trim()) return;
     onSaveMeta(name.trim(), note.trim());
+    // ↓ ADD THESE LINES
+    setTripSchedule(trip.id, scheduledAt).then(() => {
+      if (scheduledAt) {
+        scheduleTripNotification(trip.id, name.trim(), scheduledAt);
+      } else {
+        cancelTripNotification(trip.id);
+      }
+    });
     setEditing(false);
   };
 
@@ -305,6 +318,12 @@ function TripHeader({
           returnKeyType="done"
           onSubmitEditing={handleSave}
         />
+
+        <ScheduleDatePicker
+          value={scheduledAt}
+          onChange={setScheduledAt}
+        />
+        
         <View style={styles.editActions}>
           <TouchableOpacity style={styles.cancelBtn} onPress={() => { setEditing(false); setName(trip.name); setNote(trip.note ?? ''); }}>
             <Text style={styles.cancelBtnText}>Cancel</Text>

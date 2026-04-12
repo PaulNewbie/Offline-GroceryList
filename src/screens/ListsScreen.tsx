@@ -14,8 +14,11 @@ import {
   getAllTripsWithSummary, createTrip, deleteTrip,
   completeTrip, duplicateTripAsTemplate,
   formatPrice, setScannerTarget,
-  Trip, TripWithSummary,
+  Trip, TripWithSummary, setTripSchedule,
 } from '../utils/database';
+
+import ScheduleDatePicker from '../components/ScheduleDatePicker';
+import { scheduleTripNotification } from '../utils/notifications';
 
 const BUDGET_KEY     = 'grocery_budget';
 const DEFAULT_BUDGET = 2000;
@@ -68,25 +71,28 @@ function NewListModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (name: string, store: string, budget: number, note: string) => void;
+   onConfirm: (name: string, store: string, budget: number, note: string, scheduledAt: string | null) => void;
   defaultBudget: number;
 }) {
   const [name,   setName]   = useState('');
   const [store,  setStore]  = useState('');
   const [budget, setBudget] = useState(defaultBudget.toString());
   const [note,   setNote]   = useState('');
+  const [scheduledAt, setScheduledAt] = useState<string | null>(null);
 
   const canCreate = name.trim().length > 0;
 
   const handleClose = () => {
     setName(''); setStore(''); setBudget(defaultBudget.toString()); setNote('');
+    setScheduledAt(null);
     onClose();
   };
 
   const handleCreate = () => {
     if (!canCreate) return;
-    onConfirm(name.trim(), store.trim(), parseFloat(budget) || DEFAULT_BUDGET, note.trim());
+    onConfirm(name.trim(), store.trim(), parseFloat(budget) || DEFAULT_BUDGET, note.trim(), scheduledAt);
     setName(''); setStore(''); setBudget(defaultBudget.toString()); setNote('');
+    setScheduledAt(null);
     onClose();
   };
 
@@ -142,6 +148,11 @@ function NewListModal({
             keyboardType="decimal-pad"
             returnKeyType="done"
             onSubmitEditing={handleCreate}
+          />
+
+          <ScheduleDatePicker
+            value={scheduledAt}
+            onChange={setScheduledAt}
           />
 
           <View style={styles.modalActions}>
@@ -291,6 +302,7 @@ function SectionHeader({ label, accent }: { label: string; accent: string }) {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function ListsScreen({ navigation }: any) {
+  const [scheduledAt, setScheduledAt] = useState<string | null>(null); // schedule
   const [trips,           setTrips]           = useState<TripWithSummary[]>([]);
   const [showNewList,     setShowNewList]      = useState(false);
   const [defaultBudget,   setDefaultBudget]   = useState(DEFAULT_BUDGET);
@@ -314,8 +326,13 @@ export default function ListsScreen({ navigation }: any) {
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
 
   // ── Handlers ────────────────────────────────────────────
-  const handleCreate = async (name: string, store: string, budget: number, note: string) => {
+  const handleCreate = async (name: string, store: string, budget: number, note: string, scheduledAt: string | null) => {
     const id = await createTrip(name, budget, store || undefined, 'active', note || undefined);
+    // ↓ ADD THESE 4 LINES
+    if (id && scheduledAt) {
+      await setTripSchedule(id, scheduledAt);
+      await scheduleTripNotification(id, name, scheduledAt);
+    }
     load();
     if (id) navigation.navigate('TripDetail', { tripId: id });
   };

@@ -172,6 +172,13 @@ export const initDatabase = async () => {
             VALUES ('delete', old.id, old.name);
         END;
     `);
+    
+    // sceduled_at is only used for a small subset of Trips, so a partial index on
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_trips_scheduled
+        ON Trips(scheduled_at)
+        WHERE scheduled_at IS NOT NULL;
+    `);
 
     // ── Safe column migrations ─────────────────────────────────────────────────
     await addColumnIfMissing('Trips',     'note',              'TEXT');
@@ -516,6 +523,90 @@ export const searchCatalogue = async (query: string): Promise<CatalogueEntry[]> 
     } catch (e) { return []; }
   }
 };
+
+// ─── SCHEDULING ───────────────────────────────────────────────────────────────
+
+/**
+ * Fetch scheduled trips within a month window.
+ * Returns only the columns the calendar needs — not full Trip rows.
+ * The partial index on scheduled_at makes this sub-millisecond even with
+ * thousands of trips.
+ *
+ * Pass the first and last day of a month as ISO strings:
+ *   getScheduledByMonth('2025-04-01', '2025-04-30')
+ */
+export interface ScheduledDay {
+  day:        string;   // 'YYYY-MM-DD'
+  trip_count: number;
+  trips:      Array<{ id: number; name: string; scheduled_at: string }>;
+}
+
+export const getScheduledByMonth = async (
+  monthStart: string,
+  monthEnd:   string,
+): Promise<ScheduledDay[]> => {
+  try {
+    // One aggregated query — no N+1
+    const rows = await db.getAllAsync<{
+      day: string;
+      ids: string;
+      names: string;
+      times: string;
+      trip_count: number;
+    }>(`
+      SELECT
+        date(scheduled_at)                    AS day,
+        COUNT(*)                              AS trip_count,
+        GROUP_CONCAT(id,   '|')               AS ids,
+        GROUP_CONCAT(name, '|')               AS names,
+        GROUP_CONCAT(scheduled_at, '|')       AS times
+      FROM Trips
+      WHERE scheduled_at >= ?
+        AND scheduled_at <= ?
+        AND scheduled_at IS NOT NULL
+      GROUP BY date(scheduled_at)
+      ORDER BY day ASC
+    `, [monthStart, monthEnd]);
+
+    return rows.map(r => ({
+      day: r.day,
+      trip_count: r.trip_count,
+      trips: r.ids.split('|').map((id, i) => ({
+        id:           parseInt(id, 10),
+        name:         r.names.split('|')[i] ?? '',
+        scheduled_at: r.times.split('|')[i] ?? '',
+      })),
+    }));
+  } catch (e) {
+    console.error('[DB] getScheduledByMonth:', e);
+    return [];
+  }
+};
+
+/**
+ * Upcoming scheduled trips — for the HomeScreen widget.
+ * Returns trips scheduled from now through the next 7 days.
+ */
+export const getUpcomingTrips = async (): Promise<Trip[]> => {
+  try {
+    const now  = new Date().toISOString();
+    const week = new Date(Date.now() + 7 * 86400000).toISOString();
+    return await db.getAllAsync<Trip>(`
+      SELECT * FROM Trips
+      WHERE scheduled_at >= ?
+        AND scheduled_at <= ?
+        AND scheduled_at IS NOT NULL
+        AND status != 'completed'
+      ORDER BY scheduled_at ASC
+      LIMIT 10
+    `, [now, week]);
+  } catch { return []; }
+};
+
+export const setTripSchedule = async (
+  tripId:      number,
+  scheduledAt: string | null,
+): Promise<boolean> => updateTrip(tripId, { scheduled_at: scheduledAt } as any);
 
 // ─── LEGACY SHIMS ─────────────────────────────────────────────────────────────
 

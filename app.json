@@ -45,7 +45,8 @@
       ],
       "expo-sqlite",
       "expo-asset",
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

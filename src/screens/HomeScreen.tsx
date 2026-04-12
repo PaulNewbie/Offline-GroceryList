@@ -10,8 +10,10 @@ import Svg, { Path, Circle, Rect, Line, Polyline } from 'react-native-svg';
 
 import {
   getActiveTrip, getTripItems, getAllTrips,
-  Trip, TripItem,
+  Trip, TripItem, getUpcomingTrips,  
 } from '../utils/database';
+
+import CalendarModal from '../components/CalendarModal';
 
 const formatPeso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -22,6 +24,9 @@ export default function HomeScreen({ navigation }: any) {
   const [allTrips,    setAllTrips]    = useState<Trip[]>([]);
   const [refreshing,  setRefreshing]  = useState(false);
   const isFocused = useIsFocused();
+
+  const [upcomingTrips, setUpcomingTrips] = useState<Trip[]>([]);
+  const [showCalendar,  setShowCalendar]  = useState(false);
 
   const load = useCallback(async () => {
     const trip  = await getActiveTrip();
@@ -34,6 +39,8 @@ export default function HomeScreen({ navigation }: any) {
     } else {
       setTripItems([]);
     }
+    const upcoming = await getUpcomingTrips();
+    setUpcomingTrips(upcoming);
   }, []);
 
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
@@ -153,6 +160,49 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
 
+        {upcomingTrips.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Upcoming Trips</Text>
+              <TouchableOpacity onPress={() => setShowCalendar(true)}>
+                <Text style={styles.sectionLink}>Calendar →</Text>
+              </TouchableOpacity>
+            </View>
+            {upcomingTrips.map(trip => (
+              <TouchableOpacity
+                key={trip.id}
+                style={upcomingStyles.row}
+                onPress={() => navigation.navigate('TripDetail', { tripId: trip.id })}
+                activeOpacity={0.8}
+              >
+                <View style={upcomingStyles.dateBadge}>
+                  <Text style={upcomingStyles.dateDay}>
+                    {new Date(trip.scheduled_at!).getDate()}
+                  </Text>
+                  <Text style={upcomingStyles.dateMon}>
+                    {new Date(trip.scheduled_at!).toLocaleDateString('en-PH', { month: 'short' })}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={upcomingStyles.name} numberOfLines={1}>{trip.name}</Text>
+                  <Text style={upcomingStyles.time}>
+                    {new Date(trip.scheduled_at!).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+                    {trip.store ? `  ·  ${trip.store}` : ''}
+                  </Text>
+                </View>
+                <Text style={{ color: '#9CA3AF', fontSize: 18 }}>›</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={upcomingStyles.emptyCalBtn}
+            onPress={() => setShowCalendar(true)}
+          >
+            <Text style={upcomingStyles.emptyCalBtnText}>📅  View Shopping Calendar</Text>
+          </TouchableOpacity>
+        )}
+
         {/* ── Recent items preview ── */}
         {tripItems.length > 0 && (
           <View style={styles.section}>
@@ -217,6 +267,14 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
       </ScrollView>
+      <CalendarModal
+        visible={showCalendar}
+        onClose={() => setShowCalendar(false)}
+        onNavigate={(id) => {
+          setShowCalendar(false);
+          navigation.navigate('TripDetail', { tripId: id });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -289,4 +347,42 @@ const styles = StyleSheet.create({
   actionCard:  { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   actionIcon:  { fontSize: 24, marginBottom: 6 },
   actionLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
+});
+
+const upcomingStyles = StyleSheet.create({
+  row: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderLeftWidth: 3,
+    borderLeftColor: '#4F46E5',
+  },
+  dateBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateDay:  { fontSize: 16, fontWeight: '800', color: '#4F46E5' },
+  dateMon:  { fontSize: 10, fontWeight: '600', color: '#818CF8' },
+  name:     { fontSize: 14, fontWeight: '700', color: '#111827' },
+  time:     { fontSize: 12, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
+  emptyCalBtn: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: 20,
+  },
+  emptyCalBtnText: { color: '#4F46E5', fontWeight: '700', fontSize: 14 },
 });
