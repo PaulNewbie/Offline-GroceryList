@@ -1,6 +1,6 @@
 // App.tsx
 import React, { useEffect } from 'react';
-import { StyleSheet, View, Text, Platform } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -13,6 +13,7 @@ import HomeScreen       from './src/screens/HomeScreen';
 import ListsScreen      from './src/screens/ListsScreen';
 import TripDetailScreen from './src/screens/TripDetailScreen';
 import ScannerScreen    from './src/screens/ScannerScreen';
+import CatalogueScreen  from './src/screens/CatalogueScreen';
 import SettingsScreen   from './src/screens/SettingsScreen';
 
 // ─── SVG Line Icons ───────────────────────────────────────────────────────────
@@ -58,6 +59,21 @@ function IconScanner({ focused }: { focused: boolean }) {
   );
 }
 
+// ── Catalogue icon: a tag/label shape ─────────────────────────────────────────
+function IconCatalogue({ focused }: { focused: boolean }) {
+  const c = focused ? ACTIVE : INACTIVE;
+  const w = focused ? '2' : '1.6';
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
+      <Path
+        d="M3 3h7.5l8.5 8.5a2 2 0 010 2.83l-4.67 4.67a2 2 0 01-2.83 0L3 10.5V3z"
+        stroke={c} strokeWidth={w} strokeLinejoin="round" strokeLinecap="round"
+      />
+      <Circle cx="8" cy="8" r="1.5" fill={c} />
+    </Svg>
+  );
+}
+
 function IconSettings({ focused }: { focused: boolean }) {
   const c = focused ? ACTIVE : INACTIVE;
   const w = focused ? '2' : '1.6';
@@ -78,8 +94,8 @@ function TabIcon({ focused, label, Icon }: {
   return (
     <View style={styles.tabIconWrap}>
       <Icon focused={focused} />
-      <Text 
-        numberOfLines={1} 
+      <Text
+        numberOfLines={1}
         style={[styles.tabLabel, focused && styles.tabLabelFocused]}
       >
         {label}
@@ -116,7 +132,6 @@ function HomeStack() {
   );
 }
 
-// ─── The navigator that reads safe area insets at render time ─────────────────
 function AppTabs() {
   const insets = useSafeAreaInsets();
 
@@ -131,9 +146,8 @@ function AppTabs() {
           borderTopColor: '#F3F4F6',
           elevation: 0,
           shadowOpacity: 0,
-          // Increase base height slightly and ensure minimum bottom padding
           height: 65 + Math.max(insets.bottom, 0),
-          paddingBottom: Math.max(insets.bottom, 10), 
+          paddingBottom: Math.max(insets.bottom, 10),
           paddingTop: 10,
         },
       }}
@@ -141,22 +155,40 @@ function AppTabs() {
       <Tab.Screen
         name="HomeTab"
         component={HomeStack}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Home"     Icon={IconHome}     /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Home"     Icon={IconHome}      /> }}
       />
       <Tab.Screen
         name="ListsTab"
         component={ListsStack}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Lists"    Icon={IconLists}    /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Lists"    Icon={IconLists}     /> }}
       />
       <Tab.Screen
         name="ScannerTab"
         component={ScannerScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Scanner"  Icon={IconScanner}  /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Scanner"  Icon={IconScanner}   /> }}
+      />
+      {/* CatalogueTab replaces the old InventoryTab.
+          InventoryScreen had a silent bug — it showed items from whichever
+          list was the scanner target, changing without telling the user.
+          CatalogueScreen shows the global ProductCatalogue instead, which
+          is a genuinely useful view: price history, scan frequency, quick
+          add-to-list. No more ambiguity about which list you're looking at. */}
+      <Tab.Screen
+        name="CatalogueTab"
+        component={CatalogueScreen}
+        options={{
+          headerShown: true,
+          headerStyle:      { backgroundColor: '#FFFFFF' },
+          headerTitleStyle: { fontWeight: '700', color: '#111827' },
+          headerShadowVisible: false,
+          title: 'Price History',
+          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="History"  Icon={IconCatalogue} />,
+        }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Settings" Icon={IconSettings} /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Settings" Icon={IconSettings}  /> }}
       />
     </Tab.Navigator>
   );
@@ -180,7 +212,7 @@ const styles = StyleSheet.create({
   tabIconWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 65, 
+    minWidth: 60,
     gap: 3,
   },
   tabLabel: {
